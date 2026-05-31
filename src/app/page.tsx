@@ -571,6 +571,19 @@ function SummarizerSection() {
             </div>
           </div>
         </div>
+
+        <div className="mt-5 rounded-xl border border-[#c5b358]/25 bg-[#c5b358]/[0.07] p-5">
+          <div className="flex items-center gap-3 text-lg font-semibold text-white">
+            <LockKeyhole size={20} className="text-[#c5b358]" />
+            Privacy &amp; Security
+          </div>
+          <p className="mt-3 text-sm leading-7 text-zinc-300">
+            Files are processed only to generate summaries and are not permanently stored on our servers. Content is securely sent to Google Gemini for AI processing.
+          </p>
+          <p className="mt-3 text-sm font-semibold text-[#f2e7a5]">
+            Your data stays yours—always.
+          </p>
+        </div>
       </div>
     </section>
   );
@@ -788,14 +801,14 @@ export default function Home() {
       </header>
 
       <section className="relative border-b border-white/10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(197,179,88,0.12),transparent_30%),linear-gradient(135deg,rgba(255,255,255,0.04),transparent_38%)]" />
-        <div className="relative mx-auto grid max-w-7xl gap-10 px-4 pb-16 pt-14 sm:px-6 lg:grid-cols-[1fr_0.78fr] lg:items-center lg:px-8 lg:pb-24 lg:pt-20">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(197,179,88,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.08),transparent_35%)]" />
+        <div className="relative mx-auto grid max-w-7xl gap-12 px-4 pb-20 pt-16 sm:px-6 lg:grid-cols-[1fr_0.92fr] lg:items-center lg:px-8 lg:pb-28 lg:pt-24">
           <div className="flex flex-col justify-center">
             <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-[#c5b358]/35 bg-[#c5b358]/10 px-3 py-2 text-sm font-semibold text-[#f2e7a5] shadow-[0_0_32px_rgba(197,179,88,0.08)]">
               <BadgeCheck size={16} />
               Trusted by document-heavy teams and researchers
             </div>
-            <h1 className="mt-7 max-w-3xl text-5xl font-semibold leading-[1.02] tracking-normal text-white sm:text-6xl lg:text-6xl">
+            <h1 className="mt-7 max-w-4xl text-5xl font-semibold leading-[1.02] tracking-normal text-white sm:text-6xl lg:text-7xl">
               Turn 100-page documents into 1-minute insights
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-200 sm:text-xl">
@@ -819,12 +832,12 @@ export default function Home() {
               ))}
             </div>
             <div className="mt-9 flex flex-wrap items-center gap-5 text-sm text-zinc-300">
-              <span className="flex items-center gap-2"><UsersRound size={17} className="text-[#c5b358]" /> 12,000+ active readers</span>
+              <span className="flex items-center gap-2"><LockKeyhole size={17} className="text-[#c5b358]" /> Your Data Stays Yours — Always.</span>
               <span className="flex items-center gap-2"><Clock3 size={17} className="text-[#c5b358]" /> summaries in seconds</span>
             </div>
           </div>
 
-          <div className="hidden lg:block">
+          <div className="relative hidden lg:block">
             <ProductMockup />
           </div>
         </div>
@@ -955,6 +968,36 @@ export default function Home() {
         </div>
       </section>
 
+      <section id="privacy" className="border-y border-white/10 bg-[#202024] px-4 py-20 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+              {[
+                "Secure Processing",
+                "Privacy Focused",
+                "No Permanent File Storage",
+                "Powered by Google Gemini",
+              ].map((item) => (
+                <div key={item} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-sm font-semibold text-zinc-200">
+                  <Check size={18} className="text-[#c5b358]" />
+                  {item}
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Privacy Policy</p>
+              <h2 className="mt-4 text-3xl font-semibold text-white sm:text-4xl">Privacy &amp; Security by Design</h2>
+              <p className="mt-5 text-lg leading-8 text-zinc-300">
+                We understand that your documents may contain important, personal, academic, or business information. That&apos;s why uploaded files are processed only to generate summaries and are not permanently stored on our servers. Content is securely transmitted to Google Gemini for AI processing and is never used by JustFlamsit to train AI models.
+              </p>
+              <p className="mt-5 text-xl font-semibold text-[#f2e7a5]">
+                Your data stays yours—always.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="faq" className="border-y border-white/10 bg-[#202024] px-4 py-20 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-4xl">
           <SectionIntro eyebrow="FAQ" title="Questions before your first summary" copy="Clear answers for visitors who need speed, trust, and practical document support before they start." />
@@ -1004,7 +1047,7 @@ export default function Home() {
               <h3 className="text-sm font-semibold text-white">Company</h3>
               <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400">
                 <a href="mailto:hello@justflamsit.com" className="hover:text-white">Contact</a>
-                <a href="#" className="hover:text-white">Privacy Policy</a>
+                <a href="#privacy" className="hover:text-white">Privacy Policy</a>
                 <a href="#" className="hover:text-white">Terms</a>
               </div>
             </div>
