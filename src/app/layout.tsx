@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Finlandica } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const finlandica = Finlandica({
@@ -84,6 +85,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
         />
         {children}
+        <Analytics />
       </body>
     </html>
   );
