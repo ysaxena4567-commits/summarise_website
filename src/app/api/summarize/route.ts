@@ -1,0 +1,281 @@
+import { NextResponse } from "next/server";
+import mammoth from "mammoth";
+import PDFParser from "pdf2json";
+
+export const runtime = "nodejs";
+
+const GEMINI_MODEL = "gemini-2.5-flash-lite";
+const MAX_FILES = 5;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TEXT_CHARS = 240_000;
+
+type ExtractedDocument = {
+  name: string;
+  text: string;
+};
+
+type GeminiSummary = {
+  executiveSummary: string[] | string;
+  keyPoints: string[] | string;
+  importantDates: string[] | string;
+  importantPeople: string[] | string;
+  actionItems: string[] | string;
+  risks: string[] | string;
+};
+
+const sectionLabels: Array<[keyof GeminiSummary, string]> = [
+  ["executiveSummary", "Executive Summary"],
+  ["keyPoints", "Key Points"],
+  ["importantDates", "Important Dates"],
+  ["importantPeople", "Important People"],
+  ["actionItems", "Action Items"],
+  ["risks", "Risks"],
+];
+
+async function extractPdfText(buffer: Buffer) {
+  return new Promise<string>((resolve, reject) => {
+    const parser = new PDFParser(null, true);
+
+    parser.on("pdfParser_dataError", (error) => {
+      parser.destroy();
+      reject(error instanceof Error ? error : error.parserError);
+    });
+
+    parser.on("pdfParser_dataReady", () => {
+      const text = parser.getRawTextContent();
+      parser.destroy();
+      resolve(text);
+    });
+
+    parser.parseBuffer(buffer);
+  });
+}
+
+async function extractDocumentText(file: File): Promise<ExtractedDocument> {
+  if (file.size > MAX_FILE_BYTES) {
+    throw new Error(`${file.name} is larger than the 10MB limit.`);
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const fileName = file.name || "uploaded-document";
+  const lowerName = fileName.toLowerCase();
+  const mimeType = file.type;
+
+  if (lowerName.endsWith(".pdf") || mimeType === "application/pdf") {
+    return {
+      name: fileName,
+      text: await extractPdfText(buffer),
+    };
+  }
+
+  if (
+    lowerName.endsWith(".docx") ||
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    const result = await mammoth.extractRawText({ buffer });
+    return {
+      name: fileName,
+      text: result.value,
+    };
+  }
+
+  if (lowerName.endsWith(".txt") || mimeType === "text/plain") {
+    return {
+      name: fileName,
+      text: buffer.toString("utf8"),
+    };
+  }
+
+  throw new Error(`${file.name} is not supported. Upload PDF, DOCX, or TXT files.`);
+}
+
+function buildPrompt(documents: ExtractedDocument[]) {
+  const sourceText = documents
+    .map((document, index) => {
+      return `DOCUMENT ${index + 1}: ${document.name}\n${document.text.trim()}`;
+    })
+    .join("\n\n---\n\n")
+    .slice(0, MAX_TEXT_CHARS);
+
+  return `You are JustFlamsit, an AI document summarization assistant.
+
+CRITICAL RULES:
+- Use ONLY the information explicitly present in the uploaded document text below.
+- Never invent facts.
+- Never guess.
+- Never add information that is not in the document text.
+- If a category has no relevant information, return exactly: Not Mentioned In Document
+- Be thorough. Do not skip names, dates, events, risks, decisions, duties, actions, causes, results, definitions, or important facts that appear in the document.
+- Preserve original meaning, names, date ranges, and chronology.
+- If the document is educational or historical, include all major rulers, dynasties, dates, events, practices, regions, and consequences mentioned.
+- If multiple files are uploaded, combine overlapping information only when the documents support it.
+
+Return ONLY valid JSON. Do not wrap it in markdown. Do not add commentary.
+The JSON must match this exact shape:
+{
+  "executiveSummary": ["..."],
+  "keyPoints": ["..."],
+  "importantDates": ["..."],
+  "importantPeople": ["..."],
+  "actionItems": ["..."],
+  "risks": ["..."]
+}
+
+Each array should contain detailed bullet-style strings. If a section has no information, use ["Not Mentioned In Document"].
+
+Uploaded document text:
+
+${sourceText}`;
+}
+
+function normalizeSection(value: string[] | string | undefined) {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => String(item).trim()).filter(Boolean);
+    return items.length ? items : ["Not Mentioned In Document"];
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return [value.trim()];
+  }
+
+  return ["Not Mentioned In Document"];
+}
+
+function cleanJsonText(text: string) {
+  return text
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+}
+
+function formatSummary(summary: GeminiSummary) {
+  return sectionLabels
+    .map(([key, label]) => {
+      const items = normalizeSection(summary[key]);
+      const body = items.map((item) => `- ${item.replace(/\s+/g, " ").trim()}`).join("\n");
+      return `## ${label}\n${body}`;
+    })
+    .join("\n\n");
+}
+
+function extractGeminiText(response: unknown) {
+  const candidate = response as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+    }>;
+    error?: { message?: string };
+  };
+
+  if (candidate.error?.message) {
+    throw new Error(candidate.error.message);
+  }
+
+  const text = candidate.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text)
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  if (!text) {
+    throw new Error("Gemini did not return a summary. Try a clearer document.");
+  }
+
+  try {
+    const parsed = JSON.parse(cleanJsonText(text)) as Partial<GeminiSummary>;
+    return formatSummary({
+      executiveSummary: parsed.executiveSummary ?? ["Not Mentioned In Document"],
+      keyPoints: parsed.keyPoints ?? ["Not Mentioned In Document"],
+      importantDates: parsed.importantDates ?? ["Not Mentioned In Document"],
+      importantPeople: parsed.importantPeople ?? ["Not Mentioned In Document"],
+      actionItems: parsed.actionItems ?? ["Not Mentioned In Document"],
+      risks: parsed.risks ?? ["Not Mentioned In Document"],
+    });
+  } catch {
+    return text;
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "GEMINI_API_KEY is not configured on the server." },
+        { status: 500 },
+      );
+    }
+
+    const formData = await request.formData();
+    const files = formData
+      .getAll("files")
+      .filter((entry): entry is File => entry instanceof File && entry.size > 0);
+
+    if (!files.length) {
+      return NextResponse.json({ error: "Upload at least one PDF, DOCX, or TXT file." }, { status: 400 });
+    }
+
+    if (files.length > MAX_FILES) {
+      return NextResponse.json({ error: `Upload ${MAX_FILES} files or fewer.` }, { status: 400 });
+    }
+
+    const documents = await Promise.all(files.map(extractDocumentText));
+    const availableDocuments = documents.filter((document) => document.text.trim().length > 0);
+
+    if (!availableDocuments.length) {
+      return NextResponse.json(
+        { error: "No readable text was found in the uploaded file." },
+        { status: 400 },
+      );
+    }
+
+    const prompt = buildPrompt(availableDocuments);
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            topP: 0.2,
+            maxOutputTokens: 4096,
+            responseMimeType: "application/json",
+          },
+        }),
+      },
+    );
+
+    const data = await geminiResponse.json();
+
+    if (!geminiResponse.ok) {
+      const message =
+        typeof data?.error?.message === "string"
+          ? data.error.message
+          : "Gemini summarization failed.";
+      return NextResponse.json({ error: message }, { status: geminiResponse.status });
+    }
+
+    return NextResponse.json({
+      summary: extractGeminiText(data),
+      documents: availableDocuments.map((document) => ({
+        name: document.name,
+        characters: document.text.length,
+      })),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Something went wrong while summarizing.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+:root {
+  --background: #28282b;
+  --foreground: #f8f7f0;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-finlandica);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-finlandica), Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: #c5b358;
+  color: #28282b;
+}
+
+a,
+button,
+details {
+  -webkit-tap-highlight-color: transparent;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  section {
+    animation: reveal 0.7s ease both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 22%;
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
