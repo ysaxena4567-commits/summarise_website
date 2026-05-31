@@ -182,6 +182,73 @@ const privacySections = [
   },
 ];
 
+const termsBadges = [
+  "Transparent AI Processing",
+  "User-Owned Content",
+  "Privacy Focused",
+  "Secure File Handling",
+  "Professional Use Supported",
+];
+
+const termsSections = [
+  {
+    title: "1. Introduction",
+    copy: "JustFlamsit is an AI-powered document summarization platform designed to help users understand documents more efficiently.",
+  },
+  {
+    title: "2. Acceptance of Terms",
+    copy: "By accessing or using JustFlamsit, you agree to these Terms & Conditions. If you do not agree, please do not use the service.",
+  },
+  {
+    title: "3. Service Description",
+    copy: "Users may upload PDF, DOCX, TXT files, reports, assignments, contracts, research papers, and similar documents to generate AI-powered summaries.",
+  },
+  {
+    title: "4. User Ownership of Content",
+    copy: "Users retain ownership of their uploaded documents. Users retain ownership of generated summaries. JustFlamsit does not claim ownership of user content.",
+  },
+  {
+    title: "5. AI Transparency",
+    copy: "Summaries are generated using artificial intelligence. AI-generated content may contain inaccuracies or omissions. Users should independently review important information before relying on summaries for legal, financial, medical, academic, business, or professional decisions. JustFlamsit aims to generate summaries based only on uploaded content.",
+  },
+  {
+    title: "6. Privacy & Data Handling",
+    copy: "Files are processed only to provide summaries. Uploaded files are not permanently stored on JustFlamsit servers. Content may be securely transmitted to Google Gemini for AI processing. JustFlamsit does not use uploaded documents to train its own AI models.",
+  },
+  {
+    title: "7. Acceptable Use",
+    copy: "Users agree not to upload unlawful content, upload malicious files, attempt to abuse or disrupt the service, or use the platform for fraudulent activities.",
+  },
+  {
+    title: "8. Service Availability",
+    copy: "We strive to provide reliable service. Occasional downtime, maintenance, updates, or third-party interruptions may occur.",
+  },
+  {
+    title: "9. Payments & Premium Plans",
+    copy: "Premium plans may be offered. Payments may be processed through trusted providers such as Razorpay and Stripe. Pricing may change with notice. Access to premium features depends on successful payment verification.",
+  },
+  {
+    title: "10. Refund Policy Reference",
+    copy: "Please review our Refund Policy for details regarding refunds, cancellations, and billing matters.",
+  },
+  {
+    title: "11. Limitation of Liability",
+    copy: "JustFlamsit provides summaries as an informational tool. Users remain responsible for reviewing source documents. JustFlamsit is not responsible for decisions made solely based on AI-generated summaries.",
+  },
+  {
+    title: "12. Intellectual Property",
+    copy: "The JustFlamsit platform, branding, design, and software remain property of JustFlamsit. User uploaded content remains property of the user.",
+  },
+  {
+    title: "13. Updates to Terms",
+    copy: "Terms may be updated as the service evolves. Continued use of JustFlamsit indicates acceptance of updated terms.",
+  },
+  {
+    title: "14. Contact Information",
+    copy: "For questions about these Terms & Conditions, contact us at: hello@justflamsit.com",
+  },
+];
+
 function Logo() {
   return (
     <a href="#top" className="flex items-center gap-3" aria-label="JustFlamsit home">
@@ -365,6 +432,98 @@ function PrivacyPolicyModal({ onClose }: { onClose: () => void }) {
 
           <div className="mt-6 grid gap-4">
             {privacySections.map((section) => (
+              <section key={section.title} className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+                <h3 className="text-lg font-semibold text-white">{section.title}</h3>
+                <p className="mt-3 text-sm leading-7 text-zinc-300">{section.copy}</p>
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TermsConditionsModal({ onClose }: { onClose: () => void }) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] bg-black/65 px-4 py-6 backdrop-blur-sm sm:py-10"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="terms-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="mx-auto flex h-full max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#18181b] shadow-2xl shadow-black/45">
+        <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 sm:p-6">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">JustFlamsit</p>
+            <h2 id="terms-title" className="mt-2 text-3xl font-semibold text-white sm:text-4xl">
+              Terms &amp; Conditions
+            </h2>
+            <p className="mt-3 max-w-3xl text-base leading-7 text-zinc-300">
+              Clear, transparent terms designed to help you use JustFlamsit with confidence.
+            </p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            className="grid size-11 shrink-0 place-items-center rounded-lg border border-white/10 text-zinc-300 transition hover:border-[#c5b358]/50 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#c5b358]"
+            aria-label="Close terms and conditions"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+          <div className="rounded-xl border border-[#c5b358]/30 bg-[#c5b358]/[0.08] p-5">
+            <p className="text-base font-semibold leading-7 text-[#f2e7a5]">
+              Your documents remain your property. We process them only to provide the requested summarization service.
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {termsBadges.map((badge) => (
+              <div key={badge} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-3 text-sm font-semibold text-zinc-100">
+                <Check size={16} className="shrink-0 text-[#c5b358]" />
+                {badge}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 rounded-xl border border-white/10 bg-[#101012] p-5">
+            <p className="text-base leading-7 text-zinc-300">
+              These terms are written for students, researchers, freelancers, consultants, business owners, corporate managers, legal reviewers, and enterprise users who need a clear understanding of how JustFlamsit should be used.
+            </p>
+          </div>
+
+          <div className="mt-6 grid gap-4">
+            {termsSections.map((section) => (
               <section key={section.title} className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
                 <h3 className="text-lg font-semibold text-white">{section.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-zinc-300">{section.copy}</p>
@@ -829,6 +988,7 @@ export default function Home() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
+  const [showTermsConditions, setShowTermsConditions] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -860,6 +1020,7 @@ export default function Home() {
     <main id="top" className="min-h-screen overflow-hidden bg-[#28282b] text-white">
       {showLogin && !authUser && <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} />}
       {showPrivacyPolicy && <PrivacyPolicyModal onClose={() => setShowPrivacyPolicy(false)} />}
+      {showTermsConditions && <TermsConditionsModal onClose={() => setShowTermsConditions(false)} />}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#28282b]/86 backdrop-blur-xl">
         <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8" aria-label="Primary navigation">
           <Logo />
@@ -1159,7 +1320,13 @@ export default function Home() {
                 >
                   Privacy Policy
                 </button>
-                <a href="#" className="hover:text-white">Terms</a>
+                <button
+                  type="button"
+                  onClick={() => setShowTermsConditions(true)}
+                  className="w-fit text-left transition hover:text-white"
+                >
+                  Terms &amp; Conditions
+                </button>
               </div>
             </div>
             <div>
