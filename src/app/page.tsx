@@ -249,6 +249,74 @@ const termsSections = [
   },
 ];
 
+const refundBadges = [
+  "Transparent Billing",
+  "Secure Payments",
+  "Fair Refund Process",
+  "Customer-First Approach",
+  "No Hidden Charges",
+];
+
+const refundSections = [
+  {
+    title: "1. Our Commitment",
+    copy: "JustFlamsit values transparency, fairness, and customer trust in all billing matters.",
+    highlight: "We believe customers should clearly understand what they are paying for, how billing works, and how refund requests are handled.",
+  },
+  {
+    title: "2. Pricing Transparency",
+    copy: "All pricing is displayed before purchase. There are no hidden charges. Applicable taxes may be shown during checkout, and users can review plan details before payment.",
+  },
+  {
+    title: "3. Premium Plans",
+    copy: "Premium plans may include increased usage limits, larger document uploads, faster AI processing, priority access to features, and additional premium functionality.",
+  },
+  {
+    title: "4. Payment Processing",
+    copy: "Payments may be processed through trusted providers such as Razorpay and Stripe. Payment information is securely handled by payment providers. JustFlamsit does not directly store full payment card information.",
+  },
+  {
+    title: "5. Subscription Billing",
+    copy: "If subscriptions are added in the future, recurring billing, billing cycles, renewals, and applicable subscription terms will be explained clearly. Users will be informed of recurring billing where applicable.",
+  },
+  {
+    title: "6. Cancellation Policy",
+    copy: "Users may cancel future renewals at any time if subscription plans are offered. Cancellation prevents future charges. Cancellation does not automatically generate a refund for charges already processed.",
+  },
+  {
+    title: "7. Refund Eligibility",
+    copy: "Refund requests may be reviewed for duplicate charges, technical issues preventing service access, billing errors, or unauthorized purchases subject to verification. Each request is reviewed individually.",
+  },
+  {
+    title: "8. Non-Refundable Situations",
+    copy: "Refunds may not be available when the service has already been substantially used, usage limits have already been consumed, the issue is unrelated to platform functionality, or refund requests are abusive or fraudulent.",
+  },
+  {
+    title: "9. Technical Issues",
+    copy: "If users experience platform issues, JustFlamsit encourages contacting support before requesting a refund so issues can be investigated and resolved.",
+  },
+  {
+    title: "10. Processing Time",
+    copy: "Approved refunds may take several business days depending on the payment provider and banking systems. Timing may vary by region and payment method.",
+  },
+  {
+    title: "11. Chargebacks",
+    copy: "Users are encouraged to contact support before initiating chargebacks. Chargebacks may result in account review and temporary access restrictions while the matter is investigated.",
+  },
+  {
+    title: "12. Billing Disputes",
+    copy: "JustFlamsit is committed to resolving billing concerns fairly and professionally.",
+  },
+  {
+    title: "13. Future Pricing Changes",
+    copy: "Pricing may evolve as the platform grows. Existing users will be informed of material pricing changes where applicable.",
+  },
+  {
+    title: "14. Contact Us",
+    copy: "For billing, refund, payment, or account access questions, contact us at: hello@justflamsit.com. If you have questions regarding billing, refunds, payments, or account access, our team will do its best to assist you promptly and fairly.",
+  },
+];
+
 function Logo() {
   return (
     <a href="#top" className="flex items-center gap-3" aria-label="JustFlamsit home">
@@ -529,6 +597,104 @@ function TermsConditionsModal({ onClose }: { onClose: () => void }) {
                 <p className="mt-3 text-sm leading-7 text-zinc-300">{section.copy}</p>
               </section>
             ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RefundBillingModal({ onClose }: { onClose: () => void }) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] bg-black/65 px-4 py-6 backdrop-blur-sm sm:py-10"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="refund-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="mx-auto flex h-full max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#18181b] shadow-2xl shadow-black/45">
+        <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 sm:p-6">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Billing Policy</p>
+            <h2 id="refund-title" className="mt-2 text-3xl font-semibold text-white sm:text-4xl">
+              Refund, Cancellation &amp; Billing Policy
+            </h2>
+            <p className="mt-3 max-w-3xl text-base leading-7 text-zinc-300">
+              Clear and transparent billing practices designed to help you use JustFlamsit with confidence.
+            </p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            className="grid size-11 shrink-0 place-items-center rounded-lg border border-white/10 text-zinc-300 transition hover:border-[#c5b358]/50 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#c5b358]"
+            aria-label="Close refund and billing policy"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {refundBadges.map((badge) => (
+              <div key={badge} className="flex items-center gap-2 rounded-lg border border-[#c5b358]/25 bg-[#c5b358]/[0.08] px-3 py-3 text-sm font-semibold text-zinc-100">
+                <Check size={16} className="shrink-0 text-[#c5b358]" />
+                {badge}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 rounded-xl border border-white/10 bg-[#101012] p-5">
+            <p className="text-base leading-7 text-zinc-300">
+              This policy is written for students, researchers, professionals, consultants, small businesses, corporate managers, legal reviewers, and enterprise customers who want clarity before choosing paid features.
+            </p>
+          </div>
+
+          <div className="mt-6 grid gap-4">
+            {refundSections.map((section) => (
+              <section key={section.title} className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+                <h3 className="text-lg font-semibold text-white">{section.title}</h3>
+                {section.highlight && (
+                  <p className="mt-3 rounded-lg border border-[#c5b358]/25 bg-[#c5b358]/[0.08] p-3 text-sm font-semibold leading-6 text-[#f2e7a5]">
+                    {section.highlight}
+                  </p>
+                )}
+                <p className="mt-3 text-sm leading-7 text-zinc-300">{section.copy}</p>
+              </section>
+            ))}
+          </div>
+
+          <div className="mt-6 rounded-xl border border-[#c5b358]/30 bg-[#c5b358]/[0.08] p-5">
+            <h3 className="text-xl font-semibold text-white">Customer Trust Matters</h3>
+            <p className="mt-3 text-sm leading-7 text-zinc-300">
+              We are committed to transparent pricing, fair billing practices, secure payment processing, and responsive customer support. Our goal is to build long-term relationships based on trust, clarity, and value.
+            </p>
           </div>
         </div>
       </div>
@@ -989,6 +1155,7 @@ export default function Home() {
   const [showLogin, setShowLogin] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [showTermsConditions, setShowTermsConditions] = useState(false);
+  const [showRefundBilling, setShowRefundBilling] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1021,6 +1188,7 @@ export default function Home() {
       {showLogin && !authUser && <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} />}
       {showPrivacyPolicy && <PrivacyPolicyModal onClose={() => setShowPrivacyPolicy(false)} />}
       {showTermsConditions && <TermsConditionsModal onClose={() => setShowTermsConditions(false)} />}
+      {showRefundBilling && <RefundBillingModal onClose={() => setShowRefundBilling(false)} />}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#28282b]/86 backdrop-blur-xl">
         <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8" aria-label="Primary navigation">
           <Logo />
@@ -1326,6 +1494,13 @@ export default function Home() {
                   className="w-fit text-left transition hover:text-white"
                 >
                   Terms &amp; Conditions
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRefundBilling(true)}
+                  className="w-fit text-left transition hover:text-white"
+                >
+                  Refund &amp; Billing Policy
                 </button>
               </div>
             </div>
