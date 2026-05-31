@@ -23,7 +23,6 @@ import {
   LockKeyhole,
   Mail,
   Menu,
-  MessageSquareQuote,
   Microscope,
   Play,
   ShieldCheck,
@@ -107,30 +106,6 @@ const useCases: Array<{ title: string; copy: string; icon: LucideIcon }> = [
   { title: "Business Teams", copy: "Transform long updates, product docs, and meeting packs into quick decisions and next steps.", icon: UsersRound },
   { title: "Law Professionals", copy: "Review contracts, case documents, and legal research faster while preserving critical details.", icon: Landmark },
   { title: "Content Creators", copy: "Turn source material into outlines, angles, and high-signal briefs for faster production.", icon: BookOpenText },
-];
-
-const testimonials = [
-  {
-    quote: "JustFlamsit turned my weekly research pile into a morning workflow. The summaries are clean enough to act on immediately.",
-    name: "Maya R.",
-    role: "Graduate Researcher",
-  },
-  {
-    quote: "Our consulting team uses it before client readouts. It helps us find the signal fast and walk into meetings prepared.",
-    name: "Daniel K.",
-    role: "Strategy Consultant",
-  },
-  {
-    quote: "I uploaded a 78-page report and had the executive summary, risks, and next steps before my coffee cooled.",
-    name: "Priya S.",
-    role: "Operations Lead",
-  },
-];
-
-const metrics = [
-  ["50,000+", "Documents processed"],
-  ["95%", "Average reading time saved"],
-  ["4.9/5", "User satisfaction"],
 ];
 
 const faqs = [
@@ -969,29 +944,14 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="px-4 py-20 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <SectionIntro eyebrow="Social Proof" title="Trusted by fast-moving readers" copy="Students, researchers, consultants, and operators use JustFlamsit to keep document work from stealing the whole day." />
-          <div className="mt-12 grid gap-4 md:grid-cols-3">
-            {metrics.map(([value, label]) => (
-              <div key={value} className="rounded-lg border border-[#c5b358]/25 bg-[#c5b358]/10 p-6 text-center">
-                <p className="text-4xl font-semibold text-[#f2e7a5]">{value}</p>
-                <p className="mt-2 text-sm font-medium uppercase tracking-[0.14em] text-zinc-300">{label}</p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-6 grid gap-4 lg:grid-cols-3">
-            {testimonials.map((testimonial) => (
-              <figure key={testimonial.name} className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
-                <MessageSquareQuote size={25} className="text-[#c5b358]" />
-                <blockquote className="mt-5 leading-7 text-zinc-200">&ldquo;{testimonial.quote}&rdquo;</blockquote>
-                <figcaption className="mt-6 border-t border-white/10 pt-4">
-                  <p className="font-semibold text-white">{testimonial.name}</p>
-                  <p className="text-sm text-zinc-400">{testimonial.role}</p>
-                </figcaption>
-              </figure>
-            ))}
-          </div>
+      <section className="px-4 py-16 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-4xl text-center">
+          <p className="text-2xl font-semibold leading-9 text-white sm:text-3xl">
+            JustFlamsit is currently in early access.
+          </p>
+          <p className="mt-4 text-lg leading-8 text-zinc-300">
+            We&apos;re actively improving AI summaries based on user feedback.
+          </p>
         </div>
       </section>
 
