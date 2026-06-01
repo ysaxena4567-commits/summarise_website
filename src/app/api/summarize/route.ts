@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
 import PDFParser from "pdf2json";
+import { consumeServerSummary, getServerAccount, normalizeEmail, remainingSummaries } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
@@ -210,6 +211,29 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
+    const customerEmail = normalizeEmail(String(formData.get("customerEmail") || ""));
+
+    if (!customerEmail) {
+      return NextResponse.json(
+        { error: "Log in with your email before generating summaries." },
+        { status: 401 },
+      );
+    }
+
+    const usageCheck = await getServerAccount(customerEmail);
+
+    if (usageCheck.databaseBacked && remainingSummaries(usageCheck.account) <= 0) {
+      return NextResponse.json(
+        {
+          error: "You have reached your summary limit. Upgrade to JustFlamsit Pro to continue.",
+          usage: usageCheck.account,
+          databaseBacked: true,
+          upgradeRequired: true,
+        },
+        { status: 402 },
+      );
+    }
+
     const files = formData
       .getAll("files")
       .filter((entry): entry is File => entry instanceof File && entry.size > 0);
@@ -267,12 +291,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: message }, { status: geminiResponse.status });
     }
 
+    const usage = await consumeServerSummary(customerEmail);
+
     return NextResponse.json({
       summary: extractGeminiText(data),
       documents: availableDocuments.map((document) => ({
         name: document.name,
         characters: document.text.length,
       })),
+      usage: usage.account,
+      databaseBacked: usage.databaseBacked,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Something went wrong while summarizing.";

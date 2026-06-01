@@ -9,9 +9,11 @@ import { PRO_MONTHLY_SUMMARY_LIMIT, activateProPlan } from "@/lib/usage";
 type VerifyResponse = {
   paid?: boolean;
   orderId?: string;
+  customerEmail?: string;
   orderStatus?: string;
   paymentId?: string | null;
   paymentStatus?: string | null;
+  databaseBacked?: boolean;
   error?: string;
 };
 

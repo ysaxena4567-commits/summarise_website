@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { CASHFREE_PLAN, getCashfreeBaseUrl, getCashfreeHeaders } from "@/lib/cashfree";
+import { activateServerPro, normalizeEmail } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,9 @@ type CashfreeOrder = {
   order_amount?: number;
   order_currency?: string;
   cf_order_id?: string;
+  customer_details?: {
+    customer_email?: string;
+  };
   message?: string;
 };
 
@@ -56,15 +60,23 @@ async function verifyOrder(orderId: string) {
   const amountMatches = Number(order.order_amount) === CASHFREE_PLAN.amount;
   const currencyMatches = order.order_currency === CASHFREE_PLAN.currency;
   const paid = order.order_status === "PAID" && Boolean(paidPayment) && amountMatches && currencyMatches;
+  const customerEmail = normalizeEmail(order.customer_details?.customer_email);
+  const activation =
+    paid && customerEmail
+      ? await activateServerPro(customerEmail, orderId, paidPayment?.cf_payment_id)
+      : null;
 
   return {
     paid,
     orderId,
+    customerEmail,
     orderStatus: order.order_status ?? "UNKNOWN",
     cfOrderId: order.cf_order_id ?? null,
     paymentId: paidPayment?.cf_payment_id ?? null,
     paymentStatus: paidPayment?.payment_status ?? null,
     paymentTime: paidPayment?.payment_time ?? null,
+    account: activation?.account ?? null,
+    databaseBacked: activation?.databaseBacked ?? false,
     plan: CASHFREE_PLAN,
   };
 }

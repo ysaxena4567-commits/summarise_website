@@ -42,6 +42,7 @@ import {
   getRemainingSummaries,
   getUsageState,
   recordSuccessfulSummary,
+  storeUsageState,
   type UsageState,
 } from "@/lib/usage";
 
@@ -138,6 +139,9 @@ type SummarizeResponse = {
   summary?: string;
   error?: string;
   documents?: Array<{ name: string; characters: number }>;
+  usage?: UsageState;
+  databaseBacked?: boolean;
+  upgradeRequired?: boolean;
 };
 
 type AuthUser = {
@@ -807,7 +811,13 @@ function renderSummary(summary: string) {
     });
 }
 
-function SummarizerSection() {
+function SummarizerSection({
+  authUser,
+  onLoginRequest,
+}: {
+  authUser: AuthUser | null;
+  onLoginRequest: () => void;
+}) {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [summary, setSummary] = useState("");
   const [error, setError] = useState("");
@@ -815,6 +825,7 @@ function SummarizerSection() {
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [databaseBacked, setDatabaseBacked] = useState(false);
   const [usage, setUsage] = useState<UsageState>(() => {
     if (typeof window === "undefined") {
       return { plan: "free", freeUsed: 0, proUsed: 0, monthKey: "" };
@@ -824,9 +835,33 @@ function SummarizerSection() {
   });
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setUsage(getUsageState()), 0);
+    const timer = window.setTimeout(async () => {
+      if (!authUser?.email) {
+        setUsage(getUsageState());
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/account/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: authUser.email }),
+        });
+        const data = (await response.json()) as { account?: UsageState; databaseBacked?: boolean };
+
+        if (response.ok && data.account) {
+          setUsage(storeUsageState(data.account));
+          setDatabaseBacked(Boolean(data.databaseBacked));
+        } else {
+          setUsage(getUsageState());
+        }
+      } catch {
+        setUsage(getUsageState());
+      }
+    }, 0);
+
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [authUser?.email]);
 
   const addFiles = (fileList: FileList | File[]) => {
     const nextFiles = Array.from(fileList);
@@ -861,6 +896,12 @@ function SummarizerSection() {
       return;
     }
 
+    if (!authUser?.email) {
+      setError("Log in with your email to start your secure free trial.");
+      onLoginRequest();
+      return;
+    }
+
     const currentUsage = getUsageState();
     setUsage(currentUsage);
 
@@ -878,6 +919,7 @@ function SummarizerSection() {
     try {
       const formData = new FormData();
       uploadedFiles.forEach(({ file }) => formData.append("files", file));
+      formData.append("customerEmail", authUser.email);
 
       const response = await fetch("/api/summarize", {
         method: "POST",
@@ -887,11 +929,19 @@ function SummarizerSection() {
       const data = (await response.json()) as SummarizeResponse;
 
       if (!response.ok || !data.summary) {
+        if (response.status === 402 || data.upgradeRequired) {
+          setShowUpgradeModal(true);
+        }
         throw new Error(data.error || "The document could not be summarized.");
       }
 
       setSummary(data.summary);
-      setUsage(recordSuccessfulSummary(currentUsage));
+      if (data.usage) {
+        setUsage(storeUsageState(data.usage));
+        setDatabaseBacked(Boolean(data.databaseBacked));
+      } else {
+        setUsage(recordSuccessfulSummary(currentUsage));
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Something went wrong.");
     } finally {
@@ -960,6 +1010,11 @@ function SummarizerSection() {
               <Sparkles size={16} />
               {formatUsageLabel(usage)}
             </div>
+            <p className="mt-2 text-xs leading-5 text-zinc-500">
+              {databaseBacked
+                ? "Usage is synced securely to your account email."
+                : "Usage sync activates when the account database is connected."}
+            </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:w-[28rem]">
             {["Grounded output", "Copy or download"].map((item) => (
@@ -1744,7 +1799,7 @@ export default function Home() {
         </div>
       </section>
 
-      <SummarizerSection />
+      <SummarizerSection authUser={authUser} onLoginRequest={() => setShowLogin(true)} />
 
       <PaymentSection />
 

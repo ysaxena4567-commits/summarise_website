@@ -5,6 +5,7 @@ import {
   getCashfreeEnv,
   getCashfreeHeaders,
 } from "@/lib/cashfree";
+import { normalizeEmail } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
@@ -45,6 +46,15 @@ function getOrigin(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as CreateOrderBody;
+    const customerEmail = normalizeEmail(body.customerEmail);
+
+    if (!customerEmail) {
+      return NextResponse.json(
+        { error: "Enter an email before starting Cashfree checkout." },
+        { status: 400 },
+      );
+    }
+
     const orderId = `JFS_${Date.now()}_${crypto.randomUUID().replace(/-/g, "").slice(0, 10)}`;
     const origin = getOrigin(request);
 
@@ -59,7 +69,7 @@ export async function POST(request: Request) {
         customer_details: {
           customer_id: cleanCustomerId(body.customerEmail),
           customer_name: body.customerName?.trim() || "JustFlamsit User",
-          customer_email: body.customerEmail?.trim() || "support@justflamsit.com",
+          customer_email: customerEmail,
           customer_phone: cleanPhone(body.customerPhone),
         },
         order_meta: {

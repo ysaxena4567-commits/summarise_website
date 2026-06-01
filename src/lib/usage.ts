@@ -40,6 +40,13 @@ function writeUsage(usage: UsageState) {
   window.localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(usage));
 }
 
+export function storeUsageState(usage: UsageState) {
+  if (typeof window === "undefined") return usage;
+
+  writeUsage(usage);
+  return usage;
+}
+
 export function getUsageState(): UsageState {
   const storedUsage = readJson<Partial<UsageState>>(USAGE_STORAGE_KEY);
   const storedPlan = readJson<StoredPlan>(PLAN_STORAGE_KEY);
