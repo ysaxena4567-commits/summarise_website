@@ -174,7 +174,7 @@ const privacySections = [
   },
   {
     title: "8. Contact Information",
-    copy: "For privacy questions, contact us at: hello@justflamsit.com",
+    copy: "For privacy questions, contact us at: support@justflamsit.com",
   },
   {
     title: "9. Updates",
@@ -245,7 +245,7 @@ const termsSections = [
   },
   {
     title: "14. Contact Information",
-    copy: "For questions about these Terms & Conditions, contact us at: hello@justflamsit.com",
+    copy: "For questions about these Terms & Conditions, contact us at: support@justflamsit.com",
   },
 ];
 
@@ -313,7 +313,7 @@ const refundSections = [
   },
   {
     title: "14. Contact Us",
-    copy: "For billing, refund, payment, or account access questions, contact us at: hello@justflamsit.com. If you have questions regarding billing, refunds, payments, or account access, our team will do its best to assist you promptly and fairly.",
+    copy: "For billing, refund, payment, or account access questions, contact us at: support@justflamsit.com. If you have questions regarding billing, refunds, payments, or account access, our team will do its best to assist you promptly and fairly.",
   },
 ];
 
@@ -1480,7 +1480,7 @@ export default function Home() {
             <div>
               <h3 className="text-sm font-semibold text-white">Company</h3>
               <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400">
-                <a href="mailto:hello@justflamsit.com" className="hover:text-white">Contact</a>
+                <a href="mailto:support@justflamsit.com" className="hover:text-white">Contact</a>
                 <button
                   type="button"
                   onClick={() => setShowPrivacyPolicy(true)}
