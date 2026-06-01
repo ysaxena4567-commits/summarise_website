@@ -198,6 +198,11 @@ export async function activateServerPro(email: string, orderId: string, paymentI
 
   const stored = await readAccount(normalizedEmail);
   const account = normalizeAccount(normalizedEmail, stored);
+
+  if (account.plan === "pro" && account.lastPaymentOrderId === orderId) {
+    return { account, databaseBacked: true };
+  }
+
   const nextAccount: AccountRecord = {
     ...account,
     plan: "pro",
