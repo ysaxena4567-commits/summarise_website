@@ -4,14 +4,14 @@ export const CASHFREE_PLAN = {
   name: "JustFlamsit Pro Early Access",
   amount: 1,
   currency: "INR",
-  interval: "One-time sandbox checkout",
+  interval: "One-time secure checkout",
   description: "Unlock premium document summarization access for early users.",
 };
 
 type CashfreeEnv = "sandbox" | "production";
 
 export function getCashfreeEnv(): CashfreeEnv {
-  return "sandbox";
+  return process.env.CASHFREE_ENV?.toLowerCase() === "production" ? "production" : "sandbox";
 }
 
 export function getCashfreeBaseUrl() {

@@ -79,7 +79,7 @@ export async function POST(request: Request) {
         {
           error:
             data.message ||
-            "Cashfree could not create a payment order. Check sandbox credentials and try again.",
+            "Cashfree could not create a payment order. Check Cashfree credentials and environment settings, then try again.",
         },
         { status: response.status || 500 },
       );

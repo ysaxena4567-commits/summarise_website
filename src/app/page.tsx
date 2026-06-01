@@ -1162,12 +1162,12 @@ function PaymentSection() {
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[0.86fr_1.14fr] lg:items-stretch">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Upgrade</p>
-          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Buy JustFlamsit Pro with Cashfree sandbox checkout</h2>
+          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Buy JustFlamsit Pro with Cashfree checkout</h2>
           <p className="mt-4 text-base leading-8 text-zinc-300">
             Upgrade through Cashfree hosted checkout. Your payment keys stay server-side, checkout opens securely, and payment status is verified by JustFlamsit before access is recorded.
           </p>
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            {["Hosted Cashfree checkout", "Server-side verification", "No secret keys in browser", "Sandbox ready"].map((item) => (
+            {["Hosted Cashfree checkout", "Server-side verification", "No secret keys in browser", "Live payment ready"].map((item) => (
               <div key={item} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-sm font-semibold text-zinc-200">
                 <Check size={16} className="text-[#c5b358]" />
                 {item}
@@ -1190,7 +1190,7 @@ function PaymentSection() {
               </div>
               <div className="mt-6 flex items-end gap-2">
                 <span className="text-5xl font-semibold text-white">₹1</span>
-                <span className="pb-2 text-sm text-zinc-400">sandbox test payment</span>
+                <span className="pb-2 text-sm text-zinc-400">secure live payment</span>
               </div>
               <p className="mt-4 text-sm leading-7 text-zinc-300">
                 Includes premium-ready checkout wiring, secure order creation, and verified payment status recording for this browser.
@@ -1260,7 +1260,7 @@ function PaymentSection() {
                 )}
               </button>
               <p className="text-xs leading-5 text-zinc-500">
-                Sandbox mode is active. Complete payment on Cashfree&apos;s hosted checkout, then return to JustFlamsit for server-side verification.
+                Complete payment on Cashfree&apos;s secure hosted checkout, then return to JustFlamsit for server-side verification.
               </p>
             </div>
           </div>
