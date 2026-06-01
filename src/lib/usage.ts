@@ -44,6 +44,13 @@ export function storeUsageState(usage: UsageState) {
   if (typeof window === "undefined") return usage;
 
   writeUsage(usage);
+  window.localStorage.setItem(
+    PLAN_STORAGE_KEY,
+    JSON.stringify({
+      plan: usage.plan,
+      activatedAt: new Date().toISOString(),
+    }),
+  );
   return usage;
 }
 
@@ -51,7 +58,8 @@ export function getUsageState(): UsageState {
   const storedUsage = readJson<Partial<UsageState>>(USAGE_STORAGE_KEY);
   const storedPlan = readJson<StoredPlan>(PLAN_STORAGE_KEY);
   const monthKey = currentMonthKey();
-  const plan: PlanStatus = storedPlan?.plan === "pro" ? "pro" : "free";
+  const plan: PlanStatus =
+    storedPlan?.plan === "pro" || storedUsage?.plan === "pro" ? "pro" : "free";
   const usage: UsageState = {
     plan,
     freeUsed: Math.min(Math.max(Number(storedUsage?.freeUsed ?? 0), 0), FREE_SUMMARY_LIMIT),

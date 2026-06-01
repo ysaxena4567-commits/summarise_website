@@ -144,6 +144,12 @@ type SummarizeResponse = {
   upgradeRequired?: boolean;
 };
 
+type AccountStatusResponse = {
+  account?: UsageState;
+  databaseBacked?: boolean;
+  error?: string;
+};
+
 type AuthUser = {
   email: string;
   provider: "email" | "google";
@@ -755,6 +761,24 @@ function formatUsageLabel(usage: UsageState) {
   return `${remaining} of ${FREE_SUMMARY_LIMIT} free summaries remaining`;
 }
 
+async function fetchAccountUsage(email: string) {
+  const response = await fetch("/api/account/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const data = (await response.json()) as AccountStatusResponse;
+
+  if (!response.ok || !data.account) {
+    throw new Error(data.error || "Unable to sync account usage.");
+  }
+
+  return {
+    usage: storeUsageState(data.account),
+    databaseBacked: Boolean(data.databaseBacked),
+  };
+}
+
 function buildSummaryDownload(summary: string, usage: UsageState) {
   const watermark =
     usage.plan === "free"
@@ -811,6 +835,7 @@ function SummarizerSection({
   const [copied, setCopied] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [databaseBacked, setDatabaseBacked] = useState(false);
+  const [isUsageSyncing, setIsUsageSyncing] = useState(false);
   const [usage, setUsage] = useState<UsageState>(() => {
     if (typeof window === "undefined") {
       return { plan: "free", freeUsed: 0, proUsed: 0, monthKey: "" };
@@ -823,25 +848,20 @@ function SummarizerSection({
     const timer = window.setTimeout(async () => {
       if (!authUser?.email) {
         setUsage(getUsageState());
+        setIsUsageSyncing(false);
         return;
       }
 
-      try {
-        const response = await fetch("/api/account/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: authUser.email }),
-        });
-        const data = (await response.json()) as { account?: UsageState; databaseBacked?: boolean };
+      setIsUsageSyncing(true);
 
-        if (response.ok && data.account) {
-          setUsage(storeUsageState(data.account));
-          setDatabaseBacked(Boolean(data.databaseBacked));
-        } else {
-          setUsage(getUsageState());
-        }
+      try {
+        const synced = await fetchAccountUsage(authUser.email);
+        setUsage(synced.usage);
+        setDatabaseBacked(synced.databaseBacked);
       } catch {
-        setUsage(getUsageState());
+        setError("Could not sync your account usage. Refresh or try again in a moment.");
+      } finally {
+        setIsUsageSyncing(false);
       }
     }, 0);
 
@@ -887,7 +907,23 @@ function SummarizerSection({
       return;
     }
 
-    const currentUsage = getUsageState();
+    let currentUsage: UsageState;
+    let currentDatabaseBacked = databaseBacked;
+
+    try {
+      setIsUsageSyncing(true);
+      const synced = await fetchAccountUsage(authUser.email);
+      currentUsage = synced.usage;
+      currentDatabaseBacked = synced.databaseBacked;
+      setUsage(currentUsage);
+      setDatabaseBacked(currentDatabaseBacked);
+    } catch {
+      setError("Could not verify your remaining summaries. Please refresh and try again.");
+      setIsUsageSyncing(false);
+      return;
+    }
+
+    setIsUsageSyncing(false);
     setUsage(currentUsage);
 
     if (!canGenerateSummary(currentUsage)) {
@@ -992,8 +1028,8 @@ function SummarizerSection({
               PDFs, DOCX, and TXT files are processed with Gemini using only the content in your documents.
             </p>
             <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[#c5b358]/30 bg-[#c5b358]/10 px-3 py-2 text-sm font-semibold text-[#f2e7a5]">
-              <Sparkles size={16} />
-              {formatUsageLabel(usage)}
+              {isUsageSyncing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+              {isUsageSyncing && authUser?.email ? "Syncing account usage..." : formatUsageLabel(usage)}
             </div>
             <p className="mt-2 text-xs leading-5 text-zinc-500">
               {databaseBacked
@@ -1090,10 +1126,15 @@ function SummarizerSection({
             <button
               type="button"
               onClick={summarizeFiles}
-              disabled={isLoading}
+              disabled={isLoading || isUsageSyncing}
               className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-5 text-sm font-semibold text-[#28282b] transition hover:bg-[#dbc966] disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {isLoading ? (
+              {isUsageSyncing ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Checking usage
+                </>
+              ) : isLoading ? (
                 <>
                   <Loader2 size={18} className="animate-spin" />
                   Summarizing with Gemini
