@@ -41,7 +41,12 @@ function accountKey(email: string) {
 }
 
 function accountBlobPath(email: string) {
-  return `accounts/${encodeURIComponent(email)}.json`;
+  return `accounts/${Buffer.from(email).toString("base64url")}.json`;
+}
+
+function legacyAccountBlobPaths(email: string) {
+  const encoded = encodeURIComponent(email);
+  return [`accounts/${encoded}.json`, `accounts/${encodeURIComponent(encoded)}.json`];
 }
 
 function getAccountStore(): AccountStore {
@@ -117,15 +122,21 @@ async function readAccount(email: string) {
     return store.client.get<AccountRecord>(accountKey(email));
   }
 
-  try {
-    const blob = await get(accountBlobPath(email), { access: "private", useCache: false });
-    if (!blob || blob.statusCode !== 200) return null;
+  const paths = [accountBlobPath(email), ...legacyAccountBlobPaths(email)];
 
-    const text = await new Response(blob.stream).text();
-    return JSON.parse(text) as AccountRecord;
-  } catch {
-    return null;
+  for (const path of paths) {
+    try {
+      const blob = await get(path, { access: "private", useCache: false });
+      if (!blob || blob.statusCode !== 200) continue;
+
+      const text = await new Response(blob.stream).text();
+      return JSON.parse(text) as AccountRecord;
+    } catch {
+      continue;
+    }
   }
+
+  return null;
 }
 
 async function writeAccount(account: AccountRecord) {
