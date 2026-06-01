@@ -5,6 +5,7 @@ import {
   getCashfreeEnv,
   getCashfreeHeaders,
 } from "@/lib/cashfree";
+import { getAuthUserFromRequest } from "@/lib/auth";
 import { normalizeEmail } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
@@ -46,7 +47,8 @@ function getOrigin(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as CreateOrderBody;
-    const customerEmail = normalizeEmail(body.customerEmail);
+    const verifiedUser = getAuthUserFromRequest(request);
+    const customerEmail = normalizeEmail(verifiedUser?.email || body.customerEmail);
 
     if (!customerEmail) {
       return NextResponse.json(

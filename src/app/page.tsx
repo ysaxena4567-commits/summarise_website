@@ -146,7 +146,9 @@ type SummarizeResponse = {
 
 type AuthUser = {
   email: string;
-  provider: "email" | "gmail";
+  provider: "email" | "google";
+  name?: string;
+  emailVerified?: boolean;
 };
 
 type CashfreeCheckout = {
@@ -371,12 +373,14 @@ function Logo() {
 function LoginModal({
   onLogin,
   onClose,
+  initialError = "",
 }: {
   onLogin: (user: AuthUser) => void;
   onClose: () => void;
+  initialError?: string;
 }) {
   const [email, setEmail] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
 
   const cleanEmail = email.trim().toLowerCase();
 
@@ -388,21 +392,11 @@ function LoginModal({
       return;
     }
 
-    onLogin({ email: cleanEmail, provider: cleanEmail.endsWith("@gmail.com") ? "gmail" : "email" });
+    onLogin({ email: cleanEmail, provider: "email", emailVerified: false });
   };
 
-  const loginWithGmail = () => {
-    if (!cleanEmail) {
-      setError("Enter your Gmail address below, then continue with Gmail.");
-      return;
-    }
-
-    if (!cleanEmail.endsWith("@gmail.com")) {
-      setError("Use a Gmail address for Gmail login.");
-      return;
-    }
-
-    onLogin({ email: cleanEmail, provider: "gmail" });
+  const loginWithGoogle = () => {
+    window.location.href = "/api/auth/google/start";
   };
 
   return (
@@ -413,7 +407,7 @@ function LoginModal({
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#c5b358]">Welcome</p>
             <h2 className="mt-2 text-3xl font-semibold text-white">Log in to JustFlamsit</h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">
-              Sign in before uploading documents and generating summaries.
+              Your usage and Pro plan are synced to this email.
             </p>
           </div>
           <button
@@ -427,6 +421,21 @@ function LoginModal({
         </div>
 
         <form onSubmit={loginWithEmail} className="mt-6 space-y-3">
+          <button
+            type="button"
+            onClick={loginWithGoogle}
+            className="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-white transition hover:border-[#c5b358]/50 hover:bg-white/[0.07]"
+          >
+            <span className="grid size-6 place-items-center rounded-full bg-white text-sm font-bold text-[#28282b]">G</span>
+            Continue with Google
+          </button>
+
+          <div className="flex items-center gap-3 py-1">
+            <span className="h-px flex-1 bg-white/10" />
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">or</span>
+            <span className="h-px flex-1 bg-white/10" />
+          </div>
+
           <label htmlFor="login-email" className="text-sm font-semibold text-zinc-200">
             Email address
           </label>
@@ -446,20 +455,15 @@ function LoginModal({
           </div>
           {error && <p className="text-sm text-red-300">{error}</p>}
           <button
-            type="button"
-            onClick={loginWithGmail}
-            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-white transition hover:border-[#c5b358]/50 hover:bg-white/[0.07]"
-          >
-            <Mail size={18} />
-            Continue with Gmail
-          </button>
-          <button
             type="submit"
             className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-4 text-sm font-semibold text-[#28282b] transition hover:bg-[#dbc966]"
           >
             <LogIn size={18} />
-            Continue with Email
+            Continue with email
           </button>
+          <p className="rounded-lg border border-[#c5b358]/20 bg-[#c5b358]/[0.07] px-3 py-2 text-xs leading-5 text-[#f2e7a5]">
+            Your usage and Pro plan are synced to this email. Google sign-in verifies ownership; email login keeps access simple.
+          </p>
         </form>
       </div>
     </div>
@@ -1637,11 +1641,44 @@ export default function Home() {
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [showTermsConditions, setShowTermsConditions] = useState(false);
   const [showRefundBilling, setShowRefundBilling] = useState(false);
+  const [authError, setAuthError] = useState("");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const storedUser = window.localStorage.getItem("justflamsit-user");
+    const timer = window.setTimeout(async () => {
+      const params = new URLSearchParams(window.location.search);
+      const authErrorCode = params.get("auth_error");
 
+      if (authErrorCode) {
+        setAuthError(
+          authErrorCode === "google_not_configured"
+            ? "Google login is ready, but Google OAuth keys are not configured yet."
+            : "Google login could not be completed. Please try again.",
+        );
+        setShowLogin(true);
+        window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+      }
+
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        const data = (await response.json()) as { user?: AuthUser | null };
+
+        if (response.ok && data.user?.email) {
+          const googleUser: AuthUser = {
+            email: data.user.email,
+            provider: "google",
+            name: data.user.name,
+            emailVerified: true,
+          };
+          window.localStorage.setItem("justflamsit-user", JSON.stringify(googleUser));
+          setAuthUser(googleUser);
+          setShowLogin(false);
+          return;
+        }
+      } catch {
+        // Keep the email fallback below available if the session endpoint cannot be reached.
+      }
+
+      const storedUser = window.localStorage.getItem("justflamsit-user");
       if (storedUser) {
         setAuthUser(JSON.parse(storedUser) as AuthUser);
       } else {
@@ -1659,6 +1696,7 @@ export default function Home() {
   };
 
   const handleLogout = () => {
+    void fetch("/api/auth/logout", { method: "POST" });
     window.localStorage.removeItem("justflamsit-user");
     setAuthUser(null);
     setShowLogin(true);
@@ -1666,7 +1704,7 @@ export default function Home() {
 
   return (
     <main id="top" className="min-h-screen overflow-hidden bg-[#28282b] text-white">
-      {showLogin && !authUser && <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} />}
+      {showLogin && !authUser && <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} initialError={authError} />}
       {showPrivacyPolicy && <PrivacyPolicyModal onClose={() => setShowPrivacyPolicy(false)} />}
       {showTermsConditions && <TermsConditionsModal onClose={() => setShowTermsConditions(false)} />}
       {showRefundBilling && <RefundBillingModal onClose={() => setShowRefundBilling(false)} />}

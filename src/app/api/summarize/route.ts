@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
 import PDFParser from "pdf2json";
+import { getAuthUserFromRequest } from "@/lib/auth";
 import { consumeServerSummary, getServerAccount, normalizeEmail, remainingSummaries } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
@@ -211,7 +212,8 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
-    const customerEmail = normalizeEmail(String(formData.get("customerEmail") || ""));
+    const verifiedUser = getAuthUserFromRequest(request);
+    const customerEmail = normalizeEmail(verifiedUser?.email || String(formData.get("customerEmail") || ""));
 
     if (!customerEmail) {
       return NextResponse.json(
