@@ -1189,7 +1189,7 @@ function PaymentSection() {
                 </div>
               </div>
               <div className="mt-6 flex items-end gap-2">
-                <span className="text-5xl font-semibold text-white">₹199</span>
+                <span className="text-5xl font-semibold text-white">₹1</span>
                 <span className="pb-2 text-sm text-zinc-400">sandbox test payment</span>
               </div>
               <p className="mt-4 text-sm leading-7 text-zinc-300">

@@ -2,7 +2,7 @@ export const CASHFREE_API_VERSION = "2025-01-01";
 export const CASHFREE_PLAN = {
   id: "justflamsit-pro",
   name: "JustFlamsit Pro Early Access",
-  amount: 199,
+  amount: 1,
   currency: "INR",
   interval: "One-time sandbox checkout",
   description: "Unlock premium document summarization access for early users.",
