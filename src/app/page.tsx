@@ -36,6 +36,14 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import {
+  FREE_SUMMARY_LIMIT,
+  canGenerateSummary,
+  getRemainingSummaries,
+  getUsageState,
+  recordSuccessfulSummary,
+  type UsageState,
+} from "@/lib/usage";
 
 const navItems = [
   { label: "Features", href: "#features" },
@@ -149,6 +157,12 @@ type PaymentOrderResponse = {
   paymentSessionId?: string;
   mode?: "sandbox" | "production";
   error?: string;
+};
+
+type CheckoutCustomer = {
+  customerEmail?: string;
+  customerName?: string;
+  customerPhone?: string;
 };
 
 declare global {
@@ -742,6 +756,27 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatUsageLabel(usage: UsageState) {
+  const remaining = getRemainingSummaries(usage);
+
+  if (usage.plan === "pro") {
+    return `${remaining} summaries remaining this month`;
+  }
+
+  return `${remaining} of ${FREE_SUMMARY_LIMIT} free summaries remaining`;
+}
+
+function buildSummaryDownload(summary: string, usage: UsageState) {
+  const watermark =
+    usage.plan === "free"
+      ? "\n\n---\nGenerated with JustFlamsit Free. Upgrade to Pro for clean, no-watermark exports."
+      : "";
+
+  return `JustFlamsit AI Summary\nGenerated: ${new Date().toLocaleString()}\nPlan: ${
+    usage.plan === "pro" ? "JustFlamsit Pro" : "Free"
+  }\n\n${summary}${watermark}`;
+}
+
 function renderSummary(summary: string) {
   return summary
     .split("\n")
@@ -779,6 +814,19 @@ function SummarizerSection() {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [usage, setUsage] = useState<UsageState>(() => {
+    if (typeof window === "undefined") {
+      return { plan: "free", freeUsed: 0, proUsed: 0, monthKey: "" };
+    }
+
+    return getUsageState();
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setUsage(getUsageState()), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const addFiles = (fileList: FileList | File[]) => {
     const nextFiles = Array.from(fileList);
@@ -813,6 +861,15 @@ function SummarizerSection() {
       return;
     }
 
+    const currentUsage = getUsageState();
+    setUsage(currentUsage);
+
+    if (!canGenerateSummary(currentUsage)) {
+      setError("");
+      setShowUpgradeModal(true);
+      return;
+    }
+
     setIsLoading(true);
     setError("");
     setSummary("");
@@ -834,6 +891,7 @@ function SummarizerSection() {
       }
 
       setSummary(data.summary);
+      setUsage(recordSuccessfulSummary(currentUsage));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Something went wrong.");
     } finally {
@@ -871,7 +929,7 @@ function SummarizerSection() {
   const downloadSummary = () => {
     if (!summary) return;
 
-    const content = `JustFlamsit AI Summary\nGenerated: ${new Date().toLocaleString()}\n\n${summary}`;
+    const content = buildSummaryDownload(summary, usage);
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
 
@@ -889,6 +947,7 @@ function SummarizerSection() {
 
   return (
     <section id="summarizer" className="border-b border-white/10 bg-[#202024] px-4 py-16 sm:px-6 lg:px-8">
+      {showUpgradeModal && <UpgradeModal onClose={() => setShowUpgradeModal(false)} />}
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
@@ -897,6 +956,10 @@ function SummarizerSection() {
             <p className="mt-3 text-base leading-7 text-zinc-300">
               PDFs, DOCX, and TXT files are processed with Gemini using only the content in your documents.
             </p>
+            <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[#c5b358]/30 bg-[#c5b358]/10 px-3 py-2 text-sm font-semibold text-[#f2e7a5]">
+              <Sparkles size={16} />
+              {formatUsageLabel(usage)}
+            </div>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:w-[28rem]">
             {["Grounded output", "Copy or download"].map((item) => (
@@ -1094,6 +1157,167 @@ function loadCashfreeSdk() {
   });
 }
 
+async function startCashfreeCheckout(customer: CheckoutCustomer) {
+  const response = await fetch("/api/payments/create-order", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(customer),
+  });
+  const data = (await response.json()) as PaymentOrderResponse;
+
+  if (!response.ok || !data.paymentSessionId) {
+    throw new Error(data.error || "Unable to start Cashfree checkout.");
+  }
+
+  await loadCashfreeSdk();
+
+  if (!window.Cashfree) {
+    throw new Error("Cashfree checkout is unavailable. Please try again.");
+  }
+
+  const cashfree = window.Cashfree({ mode: data.mode ?? "sandbox" });
+  cashfree.checkout({
+    paymentSessionId: data.paymentSessionId,
+    redirectTarget: "_self",
+  });
+}
+
+function UpgradeModal({ onClose }: { onClose: () => void }) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const [customerEmail, setCustomerEmail] = useState(() => {
+    if (typeof window === "undefined") return "";
+
+    try {
+      const storedUser = window.localStorage.getItem("justflamsit-user");
+      return storedUser ? (JSON.parse(storedUser) as AuthUser).email : "";
+    } catch {
+      return "";
+    }
+  });
+  const [checkoutError, setCheckoutError] = useState("");
+  const [isStartingCheckout, setIsStartingCheckout] = useState(false);
+
+  useEffect(() => {
+    const previousActiveElement = document.activeElement as HTMLElement | null;
+    modalRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previousActiveElement?.focus();
+    };
+  }, [onClose]);
+
+  const handleCheckout = async () => {
+    setIsStartingCheckout(true);
+    setCheckoutError("");
+
+    try {
+      await startCashfreeCheckout({ customerEmail });
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Payment could not be started.");
+      setIsStartingCheckout(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm" role="presentation" onMouseDown={onClose}>
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="upgrade-title"
+        tabIndex={-1}
+        onMouseDown={(event) => event.stopPropagation()}
+        className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/10 bg-[#18181b] p-5 shadow-2xl shadow-black/50 outline-none sm:p-6"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Free trial finished</p>
+            <h2 id="upgrade-title" className="mt-2 text-3xl font-semibold text-white">Upgrade to keep summarizing</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-300">
+              You used your 3 free summaries. Upgrade securely with Cashfree to unlock 50 summaries every month.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="grid size-10 shrink-0 place-items-center rounded-lg border border-white/10 text-zinc-300 transition hover:border-[#c5b358]/50 hover:text-white" aria-label="Close upgrade modal">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-semibold text-white">FREE</h3>
+              <span className="rounded-md border border-white/10 px-2 py-1 text-xs font-semibold text-zinc-400">Used</span>
+            </div>
+            <ul className="mt-5 space-y-3 text-sm text-zinc-300">
+              {["3 summaries", "Watermarked exports", "Used"].map((item) => (
+                <li key={item} className="flex items-center gap-3">
+                  <Check size={16} className="text-[#c5b358]" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-xl border border-[#c5b358]/35 bg-[#c5b358]/[0.08] p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-xl font-semibold text-white">JUSTFLAMSIT PRO</h3>
+                <p className="mt-1 text-sm text-zinc-400">For regular document work</p>
+              </div>
+              <div className="text-left sm:text-right">
+                <p className="text-3xl font-semibold text-white">₹199</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#f2e7a5]">per month</p>
+              </div>
+            </div>
+            <ul className="mt-5 space-y-3 text-sm text-zinc-200">
+              {["50 summaries per month", "No watermark", "Priority processing", "Early access to new features"].map((item) => (
+                <li key={item} className="flex items-center gap-3">
+                  <Check size={16} className="text-[#c5b358]" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+
+            <label className="mt-5 block">
+              <span className="text-sm font-semibold text-zinc-200">Email for receipt</span>
+              <input
+                value={customerEmail}
+                onChange={(event) => setCustomerEmail(event.target.value)}
+                type="email"
+                placeholder="you@example.com"
+                className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70"
+              />
+            </label>
+
+            {checkoutError && (
+              <div className="mt-4 flex gap-3 rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm leading-6 text-red-100">
+                <AlertTriangle size={17} className="mt-1 shrink-0" />
+                {checkoutError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleCheckout}
+              disabled={isStartingCheckout}
+              className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-5 text-sm font-semibold text-[#28282b] transition hover:bg-[#dbc966] disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isStartingCheckout ? <Loader2 size={18} className="animate-spin" /> : <CreditCard size={18} />}
+              Upgrade with Cashfree
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PaymentSection() {
   const [customerEmail, setCustomerEmail] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -1125,31 +1349,10 @@ function PaymentSection() {
     setPaymentError("");
 
     try {
-      const response = await fetch("/api/payments/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customerEmail,
-          customerName,
-          customerPhone,
-        }),
-      });
-      const data = (await response.json()) as PaymentOrderResponse;
-
-      if (!response.ok || !data.paymentSessionId) {
-        throw new Error(data.error || "Unable to start Cashfree checkout.");
-      }
-
-      await loadCashfreeSdk();
-
-      if (!window.Cashfree) {
-        throw new Error("Cashfree checkout is unavailable. Please try again.");
-      }
-
-      const cashfree = window.Cashfree({ mode: data.mode ?? "sandbox" });
-      cashfree.checkout({
-        paymentSessionId: data.paymentSessionId,
-        redirectTarget: "_self",
+      await startCashfreeCheckout({
+        customerEmail,
+        customerName,
+        customerPhone,
       });
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : "Payment could not be started.");
@@ -1162,7 +1365,7 @@ function PaymentSection() {
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[0.86fr_1.14fr] lg:items-stretch">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Upgrade</p>
-          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Buy JustFlamsit Pro with Cashfree checkout</h2>
+          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Upgrade to JustFlamsit Pro with Cashfree checkout</h2>
           <p className="mt-4 text-base leading-8 text-zinc-300">
             Upgrade through Cashfree hosted checkout. Your payment keys stay server-side, checkout opens securely, and payment status is verified by JustFlamsit before access is recorded.
           </p>
@@ -1189,11 +1392,11 @@ function PaymentSection() {
                 </div>
               </div>
               <div className="mt-6 flex items-end gap-2">
-                <span className="text-5xl font-semibold text-white">₹1</span>
-                <span className="pb-2 text-sm text-zinc-400">secure live payment</span>
+                <span className="text-5xl font-semibold text-white">₹199</span>
+                <span className="pb-2 text-sm text-zinc-400">per month</span>
               </div>
               <p className="mt-4 text-sm leading-7 text-zinc-300">
-                Includes premium-ready checkout wiring, secure order creation, and verified payment status recording for this browser.
+                Includes 50 summaries per month, clean exports without watermarks, priority processing, and early access to new features.
               </p>
               {paymentRecord?.status === "paid" && (
                 <div className="mt-5 rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3 text-sm font-semibold text-emerald-100">

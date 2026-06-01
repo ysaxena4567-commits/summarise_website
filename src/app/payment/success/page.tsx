@@ -4,6 +4,7 @@ import { Check, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { PRO_MONTHLY_SUMMARY_LIMIT, activateProPlan } from "@/lib/usage";
 
 type VerifyResponse = {
   paid?: boolean;
@@ -48,6 +49,7 @@ function PaymentSuccessContent() {
               verifiedAt: new Date().toISOString(),
             }),
           );
+          activateProPlan(orderId, data.paymentId);
           setStatus("paid");
         } else {
           setStatus("failed");
@@ -80,7 +82,7 @@ function PaymentSuccessContent() {
                 {status === "loading"
                   ? "Please wait while JustFlamsit confirms your payment securely with Cashfree."
                   : paid
-                    ? "Your payment was verified server-side and your upgrade status has been recorded for this browser."
+                    ? `Your payment was verified server-side. JustFlamsit Pro is active with ${PRO_MONTHLY_SUMMARY_LIMIT} summaries remaining this month.`
                     : details.error || "Cashfree has not marked this order as paid yet."}
               </p>
             </div>
