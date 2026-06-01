@@ -395,10 +395,6 @@ function LoginModal({
     onLogin({ email: cleanEmail, provider: "email", emailVerified: false });
   };
 
-  const loginWithGoogle = () => {
-    window.location.href = "/api/auth/google/start";
-  };
-
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center bg-black/60 px-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#18181b] p-6 shadow-2xl shadow-black/45">
@@ -421,21 +417,6 @@ function LoginModal({
         </div>
 
         <form onSubmit={loginWithEmail} className="mt-6 space-y-3">
-          <button
-            type="button"
-            onClick={loginWithGoogle}
-            className="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-white transition hover:border-[#c5b358]/50 hover:bg-white/[0.07]"
-          >
-            <span className="grid size-6 place-items-center rounded-full bg-white text-sm font-bold text-[#28282b]">G</span>
-            Continue with Google
-          </button>
-
-          <div className="flex items-center gap-3 py-1">
-            <span className="h-px flex-1 bg-white/10" />
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">or</span>
-            <span className="h-px flex-1 bg-white/10" />
-          </div>
-
           <label htmlFor="login-email" className="text-sm font-semibold text-zinc-200">
             Email address
           </label>
@@ -462,7 +443,7 @@ function LoginModal({
             Continue with email
           </button>
           <p className="rounded-lg border border-[#c5b358]/20 bg-[#c5b358]/[0.07] px-3 py-2 text-xs leading-5 text-[#f2e7a5]">
-            Your usage and Pro plan are synced to this email. Google sign-in verifies ownership; email login keeps access simple.
+            Your usage and Pro plan are synced to this email.
           </p>
         </form>
       </div>
