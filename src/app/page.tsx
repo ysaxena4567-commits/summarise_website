@@ -11,6 +11,7 @@ import {
   CircleDollarSign,
   Clipboard,
   Clock3,
+  CreditCard,
   Download,
   FileSearch,
   FileText,
@@ -40,6 +41,7 @@ const navItems = [
   { label: "Features", href: "#features" },
   { label: "How It Works", href: "#how-it-works" },
   { label: "Use Cases", href: "#use-cases" },
+  { label: "Upgrade", href: "#upgrade" },
   { label: "FAQ", href: "#faq" },
 ];
 
@@ -135,6 +137,26 @@ type AuthUser = {
   provider: "email" | "gmail";
 };
 
+type CashfreeCheckout = {
+  checkout: (options: {
+    paymentSessionId: string;
+    redirectTarget?: "_self" | "_blank" | "_top" | "_modal";
+  }) => Promise<unknown> | void;
+};
+
+type PaymentOrderResponse = {
+  orderId?: string;
+  paymentSessionId?: string;
+  mode?: "sandbox" | "production";
+  error?: string;
+};
+
+declare global {
+  interface Window {
+    Cashfree?: (options: { mode: "sandbox" | "production" }) => CashfreeCheckout;
+  }
+}
+
 const privacyBadges = [
   "Secure Processing",
   "Temporary File Handling",
@@ -170,7 +192,7 @@ const privacySections = [
   },
   {
     title: "7. Third-Party Services",
-    copy: "Google Gemini may be used for AI processing. Payment providers such as Razorpay and Stripe may be used for secure payment processing if premium plans are purchased. Payment details are handled by the payment providers and are not stored directly by JustFlamsit.",
+    copy: "Google Gemini may be used for AI processing. Cashfree may be used for secure payment processing if premium plans are purchased. Payment details are handled by Cashfree and are not stored directly by JustFlamsit.",
   },
   {
     title: "8. Contact Information",
@@ -225,7 +247,7 @@ const termsSections = [
   },
   {
     title: "9. Payments & Premium Plans",
-    copy: "Premium plans may be offered. Payments may be processed through trusted providers such as Razorpay and Stripe. Pricing may change with notice. Access to premium features depends on successful payment verification.",
+    copy: "Premium plans may be offered. Payments may be processed through trusted providers such as Cashfree. Pricing may change with notice. Access to premium features depends on successful payment verification.",
   },
   {
     title: "10. Refund Policy Reference",
@@ -273,7 +295,7 @@ const refundSections = [
   },
   {
     title: "4. Payment Processing",
-    copy: "Payments may be processed through trusted providers such as Razorpay and Stripe. Payment information is securely handled by payment providers. JustFlamsit does not directly store full payment card information.",
+    copy: "Payments may be processed through trusted providers such as Cashfree. Payment information is securely handled by Cashfree. JustFlamsit does not directly store full payment card information.",
   },
   {
     title: "5. Subscription Billing",
@@ -1047,6 +1069,207 @@ function SummarizerSection() {
   );
 }
 
+function loadCashfreeSdk() {
+  return new Promise<void>((resolve, reject) => {
+    if (window.Cashfree) {
+      resolve();
+      return;
+    }
+
+    const existingScript = document.querySelector<HTMLScriptElement>("script[data-cashfree-sdk]");
+
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(), { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("Cashfree checkout could not load.")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+    script.async = true;
+    script.dataset.cashfreeSdk = "true";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Cashfree checkout could not load."));
+    document.head.appendChild(script);
+  });
+}
+
+function PaymentSection() {
+  const [customerEmail, setCustomerEmail] = useState(() => {
+    if (typeof window === "undefined") return "";
+
+    try {
+      const storedUser = window.localStorage.getItem("justflamsit-user");
+      return storedUser ? (JSON.parse(storedUser) as AuthUser).email : "";
+    } catch {
+      return "";
+    }
+  });
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [paymentError, setPaymentError] = useState("");
+  const [isStartingPayment, setIsStartingPayment] = useState(false);
+  const [paymentRecord] = useState<{ status: string; orderId?: string } | null>(() => {
+    if (typeof window === "undefined") return null;
+
+    try {
+      const storedPayment = window.localStorage.getItem("justflamsit-payment");
+      return storedPayment ? (JSON.parse(storedPayment) as { status: string; orderId?: string }) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const startCheckout = async () => {
+    setIsStartingPayment(true);
+    setPaymentError("");
+
+    try {
+      const response = await fetch("/api/payments/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerEmail,
+          customerName,
+          customerPhone,
+        }),
+      });
+      const data = (await response.json()) as PaymentOrderResponse;
+
+      if (!response.ok || !data.paymentSessionId) {
+        throw new Error(data.error || "Unable to start Cashfree checkout.");
+      }
+
+      await loadCashfreeSdk();
+
+      if (!window.Cashfree) {
+        throw new Error("Cashfree checkout is unavailable. Please try again.");
+      }
+
+      const cashfree = window.Cashfree({ mode: data.mode ?? "sandbox" });
+      cashfree.checkout({
+        paymentSessionId: data.paymentSessionId,
+        redirectTarget: "_self",
+      });
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Payment could not be started.");
+      setIsStartingPayment(false);
+    }
+  };
+
+  return (
+    <section id="upgrade" className="border-y border-white/10 bg-[#202024] px-4 py-16 sm:px-6 lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[0.86fr_1.14fr] lg:items-stretch">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Upgrade</p>
+          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Buy JustFlamsit Pro with Cashfree sandbox checkout</h2>
+          <p className="mt-4 text-base leading-8 text-zinc-300">
+            Upgrade through Cashfree hosted checkout. Your payment keys stay server-side, checkout opens securely, and payment status is verified by JustFlamsit before access is recorded.
+          </p>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            {["Hosted Cashfree checkout", "Server-side verification", "No secret keys in browser", "Sandbox ready"].map((item) => (
+              <div key={item} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-sm font-semibold text-zinc-200">
+                <Check size={16} className="text-[#c5b358]" />
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-[#161618] p-5 shadow-2xl shadow-black/20">
+          <div className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
+            <div className="rounded-xl border border-[#c5b358]/30 bg-[#c5b358]/[0.08] p-5">
+              <div className="flex items-center gap-3">
+                <span className="grid size-11 place-items-center rounded-lg bg-[#c5b358] text-[#28282b]">
+                  <CreditCard size={22} />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#f2e7a5]">Early access plan</p>
+                  <h3 className="text-2xl font-semibold text-white">JustFlamsit Pro</h3>
+                </div>
+              </div>
+              <div className="mt-6 flex items-end gap-2">
+                <span className="text-5xl font-semibold text-white">₹199</span>
+                <span className="pb-2 text-sm text-zinc-400">sandbox test payment</span>
+              </div>
+              <p className="mt-4 text-sm leading-7 text-zinc-300">
+                Includes premium-ready checkout wiring, secure order creation, and verified payment status recording for this browser.
+              </p>
+              {paymentRecord?.status === "paid" && (
+                <div className="mt-5 rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3 text-sm font-semibold text-emerald-100">
+                  Payment verified for order {paymentRecord.orderId}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-sm font-semibold text-zinc-200">Email</span>
+                <input
+                  value={customerEmail}
+                  onChange={(event) => setCustomerEmail(event.target.value)}
+                  type="email"
+                  placeholder="you@example.com"
+                  className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-zinc-200">Name</span>
+                <input
+                  value={customerName}
+                  onChange={(event) => setCustomerName(event.target.value)}
+                  type="text"
+                  placeholder="Your name"
+                  className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-zinc-200">Phone</span>
+                <input
+                  value={customerPhone}
+                  onChange={(event) => setCustomerPhone(event.target.value)}
+                  type="tel"
+                  placeholder="10 digit phone number"
+                  className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70"
+                />
+              </label>
+
+              {paymentError && (
+                <div className="flex gap-3 rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm leading-6 text-red-100">
+                  <AlertTriangle size={17} className="mt-1 shrink-0" />
+                  {paymentError}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={startCheckout}
+                disabled={isStartingPayment}
+                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-5 text-sm font-semibold text-[#28282b] transition hover:bg-[#dbc966] disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isStartingPayment ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Opening Cashfree
+                  </>
+                ) : (
+                  <>
+                    <CreditCard size={18} />
+                    Buy / Upgrade with Cashfree
+                  </>
+                )}
+              </button>
+              <p className="text-xs leading-5 text-zinc-500">
+                Sandbox mode is active. Complete payment on Cashfree&apos;s hosted checkout, then return to JustFlamsit for server-side verification.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SectionIntro({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) {
   return (
     <div className="mx-auto max-w-3xl text-center">
@@ -1319,6 +1542,8 @@ export default function Home() {
       </section>
 
       <SummarizerSection />
+
+      <PaymentSection />
 
       <section className="px-4 py-20 sm:px-6 lg:px-8">
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr]">
