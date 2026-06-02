@@ -85,6 +85,10 @@ export async function sendMagicLinkEmail(email: string, magicLink: string) {
   const data = (await response.json().catch(() => ({}))) as BrevoEmailResponse;
 
   if (!response.ok) {
+    if (data.message?.toLowerCase().includes("unrecognised ip address")) {
+      throw new Error("Email delivery is blocked by Brevo security settings. Please contact support.");
+    }
+
     throw new Error(data.message || "Brevo could not send the magic link email.");
   }
 
