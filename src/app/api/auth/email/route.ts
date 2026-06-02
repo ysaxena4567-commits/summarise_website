@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSiteUrl, sendMagicLinkEmail } from "@/lib/brevo";
-import { createMagicToken, magicLinkExpiresMinutes, storeMagicLink } from "@/lib/magicLinks";
+import { AUTH_COOKIE_NAME, createAuthToken, secureCookieOptions } from "@/lib/auth";
 import { getServerAccount, normalizeEmail } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
@@ -18,26 +17,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
     }
 
-    const token = createMagicToken();
-    await storeMagicLink(email, token);
     await getServerAccount(email);
 
-    const magicLink = `${getSiteUrl()}/api/auth/magic/verify?token=${encodeURIComponent(token)}`;
-    const delivery = await sendMagicLinkEmail(email, magicLink);
-
-    console.info("JustFlamsit magic link accepted by Brevo", {
-      messageId: delivery.messageId || "unknown",
-      emailDomain: email.split("@")[1] || "unknown",
+    const response = NextResponse.json({
+      user: {
+        email,
+        provider: "email",
+        emailVerified: true,
+      },
     });
 
-    return NextResponse.json({
-      ok: true,
-      email,
-      expiresInMinutes: magicLinkExpiresMinutes(),
-      message: "Check your email for a secure JustFlamsit sign-in link.",
-    });
+    response.cookies.set(
+      AUTH_COOKIE_NAME,
+      createAuthToken({
+        email,
+        provider: "email",
+        emailVerified: true,
+      }),
+      secureCookieOptions(60 * 60 * 24 * 30),
+    );
+
+    return response;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not send the magic link right now.";
+    const message = error instanceof Error ? error.message : "Could not sign in right now.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

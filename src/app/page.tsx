@@ -154,7 +154,6 @@ type AuthResponse = {
   user?: AuthUser | null;
   ok?: boolean;
   email?: string;
-  expiresInMinutes?: number;
   message?: string;
   error?: string;
 };
@@ -386,9 +385,11 @@ function Logo() {
 }
 
 function LoginModal({
+  onLogin,
   onClose,
   initialError = "",
 }: {
+  onLogin: (user: AuthUser) => void;
   onClose: () => void;
   initialError?: string;
 }) {
@@ -396,12 +397,11 @@ function LoginModal({
   const [error, setError] = useState(initialError);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [sentEmail, setSentEmail] = useState("");
-  const [expiresInMinutes, setExpiresInMinutes] = useState(15);
   const [resendMessage, setResendMessage] = useState("");
 
   const cleanEmail = email.trim().toLowerCase();
 
-  const requestMagicLink = async (targetEmail: string) => {
+  const requestEmailSession = async (targetEmail: string) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
       setError("Enter a valid email address.");
       return;
@@ -419,15 +419,24 @@ function LoginModal({
       });
       const data = (await response.json()) as AuthResponse;
 
+      if (response.ok && data.user?.email) {
+        onLogin({
+          email: data.user.email,
+          provider: data.user.provider || "email",
+          name: data.user.name,
+          emailVerified: true,
+        });
+        return;
+      }
+
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Magic link could not be sent.");
+        throw new Error(data.error || "Sign-in could not be completed.");
       }
 
       setSentEmail(data.email || targetEmail);
-      setExpiresInMinutes(data.expiresInMinutes || 15);
-      setResendMessage("A fresh sign-in link was sent.");
+      setResendMessage("Your secure email session is ready.");
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "Could not send the sign-in link. Please try again.");
+      setError(loginError instanceof Error ? loginError.message : "Could not sign in. Please try again.");
     } finally {
       setIsSigningIn(false);
     }
@@ -435,7 +444,7 @@ function LoginModal({
 
   const loginWithEmail = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await requestMagicLink(cleanEmail);
+    await requestEmailSession(cleanEmail);
   };
 
   return (
@@ -466,27 +475,24 @@ function LoginModal({
                 <Mail size={18} />
               </span>
               <div>
-                <h3 className="text-base font-semibold text-white">Check your email</h3>
+                <h3 className="text-base font-semibold text-white">Email account ready</h3>
                 <p className="mt-2 text-sm leading-6 text-zinc-300">
-                  We sent a secure sign-in link to <span className="font-semibold text-white">{sentEmail}</span>. Click it to open your verified JustFlamsit account.
+                  Your JustFlamsit account is connected to <span className="font-semibold text-white">{sentEmail}</span>.
                 </p>
                 <p className="mt-2 text-xs leading-5 text-[#f2e7a5]">
-                  The link expires in {expiresInMinutes} minutes and can be used once.
-                </p>
-                <p className="mt-2 text-xs leading-5 text-zinc-400">
-                  If it is not in your inbox, check Spam, Promotions, Updates, or search for “JustFlamsit”.
+                  Your usage and Pro plan are synced to this email.
                 </p>
                 {resendMessage && <p className="mt-3 text-xs font-semibold text-emerald-200">{resendMessage}</p>}
                 {error && <p className="mt-3 text-xs font-semibold text-red-300">{error}</p>}
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                   <button
                     type="button"
-                    onClick={() => requestMagicLink(sentEmail)}
+                    onClick={() => requestEmailSession(sentEmail)}
                     disabled={isSigningIn}
                     className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[#c5b358]/35 px-3 text-sm font-semibold text-white transition hover:border-[#c5b358] disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     {isSigningIn ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
-                    Resend link
+                    Continue
                   </button>
                   <button
                     type="button"
@@ -1795,8 +1801,6 @@ export default function Home() {
         setAuthError(
           authErrorCode === "google_not_configured"
             ? "Google login is ready, but Google OAuth keys are not configured yet."
-            : authErrorCode === "magic_link_invalid"
-              ? "That sign-in link is expired or already used. Please request a new one."
             : "Google login could not be completed. Please try again.",
         );
         setShowLogin(true);
@@ -1830,6 +1834,12 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  const handleLogin = (user: AuthUser) => {
+    window.localStorage.setItem("justflamsit-user", JSON.stringify(user));
+    setAuthUser(user);
+    setShowLogin(false);
+  };
+
   const handleLogout = () => {
     void fetch("/api/auth/logout", { method: "POST" });
     window.localStorage.removeItem("justflamsit-user");
@@ -1839,7 +1849,7 @@ export default function Home() {
 
   return (
     <main id="top" className="min-h-screen overflow-hidden bg-[#28282b] text-white">
-      {showLogin && !authUser && <LoginModal onClose={() => setShowLogin(false)} initialError={authError} />}
+      {showLogin && !authUser && <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} initialError={authError} />}
       {showPrivacyPolicy && <PrivacyPolicyModal onClose={() => setShowPrivacyPolicy(false)} />}
       {showTermsConditions && <TermsConditionsModal onClose={() => setShowTermsConditions(false)} />}
       {showRefundBilling && <RefundBillingModal onClose={() => setShowRefundBilling(false)} />}
