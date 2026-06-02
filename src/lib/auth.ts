@@ -65,7 +65,7 @@ export function parseAuthToken(token?: string | null): ServerAuthUser | null {
 
     return {
       email,
-      provider: "google",
+      provider: data.provider,
       name: data.name,
       picture: data.picture,
       emailVerified: true,
