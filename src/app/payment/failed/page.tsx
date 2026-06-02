@@ -41,7 +41,10 @@ export default function PaymentFailedPage() {
               <ArrowLeft size={16} />
               Back to upgrade
             </Link>
-            <a href="mailto:support@justflamsit.com" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-white/10 px-5 text-sm font-semibold text-white transition hover:border-[#c5b358]/50">
+            <a
+              href="mailto:support@justflamsit.com?subject=JustFlamsit%20Payment%20Support&body=Hi%20JustFlamsit%20Support%2C%0A%0AI%20need%20help%20with%20a%20payment.%20My%20order%20details%20are%3A%0A%0A"
+              className="inline-flex min-h-12 items-center justify-center rounded-lg border border-white/10 px-5 text-sm font-semibold text-white transition hover:border-[#c5b358]/50"
+            >
               Contact support
             </a>
           </div>

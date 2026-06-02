@@ -396,8 +396,6 @@ function LoginModal({
   const [email, setEmail] = useState("");
   const [error, setError] = useState(initialError);
   const [isSigningIn, setIsSigningIn] = useState(false);
-  const [sentEmail, setSentEmail] = useState("");
-  const [resendMessage, setResendMessage] = useState("");
 
   const cleanEmail = email.trim().toLowerCase();
 
@@ -409,7 +407,6 @@ function LoginModal({
 
     setIsSigningIn(true);
     setError("");
-    setResendMessage("");
 
     try {
       const response = await fetch("/api/auth/email", {
@@ -429,12 +426,9 @@ function LoginModal({
         return;
       }
 
-      if (!response.ok || !data.ok) {
+      if (!response.ok) {
         throw new Error(data.error || "Sign-in could not be completed.");
       }
-
-      setSentEmail(data.email || targetEmail);
-      setResendMessage("Your secure email session is ready.");
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "Could not sign in. Please try again.");
     } finally {
@@ -468,48 +462,6 @@ function LoginModal({
           </button>
         </div>
 
-        {sentEmail ? (
-          <div className="mt-6 rounded-xl border border-[#c5b358]/25 bg-[#c5b358]/[0.08] p-4">
-            <div className="flex items-start gap-3">
-              <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#c5b358] text-[#28282b]">
-                <Mail size={18} />
-              </span>
-              <div>
-                <h3 className="text-base font-semibold text-white">Email account ready</h3>
-                <p className="mt-2 text-sm leading-6 text-zinc-300">
-                  Your JustFlamsit account is connected to <span className="font-semibold text-white">{sentEmail}</span>.
-                </p>
-                <p className="mt-2 text-xs leading-5 text-[#f2e7a5]">
-                  Your usage and Pro plan are synced to this email.
-                </p>
-                {resendMessage && <p className="mt-3 text-xs font-semibold text-emerald-200">{resendMessage}</p>}
-                {error && <p className="mt-3 text-xs font-semibold text-red-300">{error}</p>}
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={() => requestEmailSession(sentEmail)}
-                    disabled={isSigningIn}
-                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[#c5b358]/35 px-3 text-sm font-semibold text-white transition hover:border-[#c5b358] disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {isSigningIn ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
-                    Continue
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSentEmail("");
-                      setError("");
-                      setResendMessage("");
-                    }}
-                    className="inline-flex min-h-10 items-center justify-center rounded-lg px-3 text-sm font-semibold text-white underline decoration-[#c5b358]/60 underline-offset-4 transition hover:text-[#f2e7a5]"
-                  >
-                    Use a different email
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
         <form onSubmit={loginWithEmail} className="mt-6 space-y-3">
           <label htmlFor="login-email" className="text-sm font-semibold text-zinc-200">
             Email address
@@ -542,7 +494,6 @@ function LoginModal({
             Your usage and Pro plan are synced to this email.
           </p>
         </form>
-        )}
       </div>
     </div>
   );
@@ -2158,7 +2109,12 @@ export default function Home() {
             <div>
               <h3 className="text-sm font-semibold text-white">Company</h3>
               <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400">
-                <a href="mailto:support@justflamsit.com" className="hover:text-white">Contact</a>
+                <a
+                  href="mailto:support@justflamsit.com?subject=JustFlamsit%20Support%20Request&body=Hi%20JustFlamsit%20Support%2C%0A%0AI%20need%20help%20with%3A%0A%0A"
+                  className="hover:text-white"
+                >
+                  Contact
+                </a>
                 <button
                   type="button"
                   onClick={() => setShowPrivacyPolicy(true)}
