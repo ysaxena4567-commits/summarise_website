@@ -35,7 +35,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   FREE_SUMMARY_LIMIT,
   canGenerateSummary,
@@ -147,6 +147,11 @@ type SummarizeResponse = {
 type AccountStatusResponse = {
   account?: UsageState;
   databaseBacked?: boolean;
+  error?: string;
+};
+
+type AuthResponse = {
+  user?: AuthUser | null;
   error?: string;
 };
 
@@ -387,10 +392,11 @@ function LoginModal({
 }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState(initialError);
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   const cleanEmail = email.trim().toLowerCase();
 
-  const loginWithEmail = (event: FormEvent<HTMLFormElement>) => {
+  const loginWithEmail = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
@@ -398,7 +404,32 @@ function LoginModal({
       return;
     }
 
-    onLogin({ email: cleanEmail, provider: "email", emailVerified: false });
+    setIsSigningIn(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/auth/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+      const data = (await response.json()) as AuthResponse;
+
+      if (!response.ok || !data.user?.email) {
+        throw new Error(data.error || "Sign-in could not be completed.");
+      }
+
+      onLogin({
+        email: data.user.email,
+        provider: data.user.provider || "email",
+        name: data.user.name,
+        emailVerified: true,
+      });
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Could not sign in. Please try again.");
+    } finally {
+      setIsSigningIn(false);
+    }
   };
 
   return (
@@ -407,9 +438,9 @@ function LoginModal({
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#c5b358]">Welcome</p>
-            <h2 className="mt-2 text-3xl font-semibold text-white">Log in to JustFlamsit</h2>
+            <h2 className="mt-2 text-3xl font-semibold text-white">Create your free JustFlamsit account</h2>
             <p className="mt-2 text-sm leading-6 text-zinc-400">
-              Your usage and Pro plan are synced to this email.
+              Sign in to get 3 free AI summaries. No credit card required.
             </p>
           </div>
           <button
@@ -436,6 +467,7 @@ function LoginModal({
                 setEmail(event.target.value);
                 setError("");
               }}
+              disabled={isSigningIn}
               placeholder="you@gmail.com"
               className="min-h-12 w-full bg-transparent text-white outline-none placeholder:text-zinc-500"
             />
@@ -443,10 +475,11 @@ function LoginModal({
           {error && <p className="text-sm text-red-300">{error}</p>}
           <button
             type="submit"
+            disabled={isSigningIn}
             className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-4 text-sm font-semibold text-[#28282b] transition hover:bg-[#dbc966]"
           >
-            <LogIn size={18} />
-            Continue with email
+            {isSigningIn ? <Loader2 size={18} className="animate-spin" /> : <LogIn size={18} />}
+            Continue with Email
           </button>
           <p className="rounded-lg border border-[#c5b358]/20 bg-[#c5b358]/[0.07] px-3 py-2 text-xs leading-5 text-[#f2e7a5]">
             Your usage and Pro plan are synced to this email.
@@ -733,10 +766,19 @@ function RefundBillingModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function CtaButton({ href = "#summarizer", children = "Start Summarizing Free" }) {
+function CtaButton({
+  href = "#summarizer",
+  children = "Start Summarizing Free",
+  onClick,
+}: {
+  href?: string;
+  children?: string;
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+}) {
   return (
     <a
       href={href}
+      onClick={onClick}
       className="group inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-5 text-sm font-semibold text-[#28282b] shadow-[0_18px_50px_rgba(197,179,88,0.22)] transition hover:-translate-y-0.5 hover:bg-[#dbc966] focus:outline-none focus:ring-2 focus:ring-[#c5b358] focus:ring-offset-2 focus:ring-offset-[#28282b]"
     >
       {children}
@@ -836,6 +878,7 @@ function SummarizerSection({
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [databaseBacked, setDatabaseBacked] = useState(false);
   const [isUsageSyncing, setIsUsageSyncing] = useState(false);
+  const pendingFilesRef = useRef<File[] | null>(null);
   const [usage, setUsage] = useState<UsageState>(() => {
     if (typeof window === "undefined") {
       return { plan: "free", freeUsed: 0, proUsed: 0, monthKey: "" };
@@ -868,8 +911,7 @@ function SummarizerSection({
     return () => window.clearTimeout(timer);
   }, [authUser?.email]);
 
-  const addFiles = (fileList: FileList | File[]) => {
-    const nextFiles = Array.from(fileList);
+  const addSupportedFiles = useCallback((nextFiles: File[]) => {
     const supportedFiles = nextFiles.filter((file) => /\.(pdf|docx|txt)$/i.test(file.name));
 
     if (supportedFiles.length !== nextFiles.length) {
@@ -889,6 +931,37 @@ function SummarizerSection({
 
       return [...current, ...unique].slice(0, 5);
     });
+  }, []);
+
+  const addFiles = (fileList: FileList | File[]) => {
+    const nextFiles = Array.from(fileList);
+
+    if (!authUser?.email) {
+      pendingFilesRef.current = nextFiles;
+      setError("Sign in first to upload documents securely.");
+      onLoginRequest();
+      return;
+    }
+
+    addSupportedFiles(nextFiles);
+  };
+
+  useEffect(() => {
+    if (!authUser?.email || !pendingFilesRef.current?.length) return;
+
+    const filesToAdd = pendingFilesRef.current;
+    pendingFilesRef.current = null;
+    const timer = window.setTimeout(() => addSupportedFiles(filesToAdd), 0);
+
+    return () => window.clearTimeout(timer);
+  }, [authUser?.email, addSupportedFiles]);
+
+  const requestUploadLogin = (event: MouseEvent<HTMLElement>) => {
+    if (authUser?.email) return;
+
+    event.preventDefault();
+    setError("Sign in first to upload documents securely.");
+    onLoginRequest();
   };
 
   const removeFile = (id: string) => {
@@ -950,6 +1023,9 @@ function SummarizerSection({
       const data = (await response.json()) as SummarizeResponse;
 
       if (!response.ok || !data.summary) {
+        if (response.status === 401) {
+          onLoginRequest();
+        }
         if (response.status === 402 || data.upgradeRequired) {
           setShowUpgradeModal(true);
         }
@@ -1018,7 +1094,9 @@ function SummarizerSection({
 
   return (
     <section id="summarizer" className="border-b border-white/10 bg-[#202024] px-4 py-16 sm:px-6 lg:px-8">
-      {showUpgradeModal && <UpgradeModal onClose={() => setShowUpgradeModal(false)} />}
+      {showUpgradeModal && (
+        <UpgradeModal authUser={authUser} onClose={() => setShowUpgradeModal(false)} onLoginRequest={onLoginRequest} />
+      )}
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
@@ -1051,6 +1129,7 @@ function SummarizerSection({
           <div className="rounded-2xl border border-white/10 bg-[#161618] p-4 shadow-2xl shadow-black/20 sm:p-5">
             <label
               htmlFor="document-upload"
+              onClick={requestUploadLogin}
               onDragOver={(event) => {
                 event.preventDefault();
                 setIsDragging(true);
@@ -1263,18 +1342,9 @@ async function startCashfreeCheckout(customer: CheckoutCustomer) {
   });
 }
 
-function UpgradeModal({ onClose }: { onClose: () => void }) {
+function UpgradeModal({ authUser, onClose, onLoginRequest }: { authUser: AuthUser | null; onClose: () => void; onLoginRequest: () => void }) {
   const modalRef = useRef<HTMLDivElement>(null);
-  const [customerEmail, setCustomerEmail] = useState(() => {
-    if (typeof window === "undefined") return "";
-
-    try {
-      const storedUser = window.localStorage.getItem("justflamsit-user");
-      return storedUser ? (JSON.parse(storedUser) as AuthUser).email : "";
-    } catch {
-      return "";
-    }
-  });
+  const customerEmail = authUser?.email || "";
   const [checkoutError, setCheckoutError] = useState("");
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
 
@@ -1294,6 +1364,12 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   const handleCheckout = async () => {
+    if (!customerEmail) {
+      setCheckoutError("Sign in with your email before upgrading.");
+      onLoginRequest();
+      return;
+    }
+
     setIsStartingCheckout(true);
     setCheckoutError("");
 
@@ -1321,7 +1397,7 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Free trial finished</p>
             <h2 id="upgrade-title" className="mt-2 text-3xl font-semibold text-white">Upgrade to keep summarizing</h2>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-300">
-              You used your 3 free summaries. Upgrade securely with Cashfree to unlock 50 summaries every month.
+              You&apos;ve used your 3 free summaries. Upgrade to JustFlamsit Pro to continue.
             </p>
           </div>
           <button type="button" onClick={onClose} className="grid size-10 shrink-0 place-items-center rounded-lg border border-white/10 text-zinc-300 transition hover:border-[#c5b358]/50 hover:text-white" aria-label="Close upgrade modal">
@@ -1365,16 +1441,12 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
               ))}
             </ul>
 
-            <label className="mt-5 block">
+            <div className="mt-5 block">
               <span className="text-sm font-semibold text-zinc-200">Email for receipt</span>
-              <input
-                value={customerEmail}
-                onChange={(event) => setCustomerEmail(event.target.value)}
-                type="email"
-                placeholder="you@example.com"
-                className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70"
-              />
-            </label>
+              <div className="mt-2 flex min-h-11 items-center rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-zinc-300">
+                {customerEmail || "Sign in to continue"}
+              </div>
+            </div>
 
             {checkoutError && (
               <div className="mt-4 flex gap-3 rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm leading-6 text-red-100">
@@ -1399,17 +1471,8 @@ function UpgradeModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function PaymentSection() {
-  const [customerEmail, setCustomerEmail] = useState(() => {
-    if (typeof window === "undefined") return "";
-
-    try {
-      const storedUser = window.localStorage.getItem("justflamsit-user");
-      return storedUser ? (JSON.parse(storedUser) as AuthUser).email : "";
-    } catch {
-      return "";
-    }
-  });
+function PaymentSection({ authUser, onLoginRequest }: { authUser: AuthUser | null; onLoginRequest: () => void }) {
+  const customerEmail = authUser?.email || "";
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [paymentError, setPaymentError] = useState("");
@@ -1426,6 +1489,12 @@ function PaymentSection() {
   });
 
   const startCheckout = async () => {
+    if (!customerEmail) {
+      setPaymentError("Sign in with your email before upgrading to Pro.");
+      onLoginRequest();
+      return;
+    }
+
     setIsStartingPayment(true);
     setPaymentError("");
 
@@ -1491,8 +1560,8 @@ function PaymentSection() {
                 <span className="text-sm font-semibold text-zinc-200">Email</span>
                 <input
                   value={customerEmail}
-                  onChange={(event) => setCustomerEmail(event.target.value)}
                   type="email"
+                  readOnly
                   placeholder="you@example.com"
                   className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70"
                 />
@@ -1685,14 +1754,14 @@ export default function Home() {
         const data = (await response.json()) as { user?: AuthUser | null };
 
         if (response.ok && data.user?.email) {
-          const googleUser: AuthUser = {
+          const signedInUser: AuthUser = {
             email: data.user.email,
-            provider: "google",
+            provider: data.user.provider || "email",
             name: data.user.name,
             emailVerified: true,
           };
-          window.localStorage.setItem("justflamsit-user", JSON.stringify(googleUser));
-          setAuthUser(googleUser);
+          window.localStorage.setItem("justflamsit-user", JSON.stringify(signedInUser));
+          setAuthUser(signedInUser);
           setShowLogin(false);
           return;
         }
@@ -1700,12 +1769,8 @@ export default function Home() {
         // Keep the email fallback below available if the session endpoint cannot be reached.
       }
 
-      const storedUser = window.localStorage.getItem("justflamsit-user");
-      if (storedUser) {
-        setAuthUser(JSON.parse(storedUser) as AuthUser);
-      } else {
-        setShowLogin(true);
-      }
+      window.localStorage.removeItem("justflamsit-user");
+      setAuthUser(null);
     }, 0);
 
     return () => window.clearTimeout(timer);
@@ -1721,7 +1786,7 @@ export default function Home() {
     void fetch("/api/auth/logout", { method: "POST" });
     window.localStorage.removeItem("justflamsit-user");
     setAuthUser(null);
-    setShowLogin(true);
+    setShowLogin(false);
   };
 
   return (
@@ -1820,7 +1885,13 @@ export default function Home() {
               Use AI to instantly summarize reports, PDFs, assignments, contracts, research papers, and lengthy files into clear, actionable summaries.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <CtaButton />
+              <CtaButton
+                onClick={(event) => {
+                  if (authUser) return;
+                  event.preventDefault();
+                  setShowLogin(true);
+                }}
+              />
               <a href="#how-it-works" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/15 px-5 text-sm font-semibold text-white transition hover:border-[#c5b358]/70 hover:bg-white/5">
                 <Play size={16} fill="currentColor" />
                 See How It Works
@@ -1861,7 +1932,7 @@ export default function Home() {
 
       <SummarizerSection authUser={authUser} onLoginRequest={() => setShowLogin(true)} />
 
-      <PaymentSection />
+      <PaymentSection authUser={authUser} onLoginRequest={() => setShowLogin(true)} />
 
       <section className="px-4 py-20 sm:px-6 lg:px-8">
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr]">
@@ -2000,7 +2071,13 @@ export default function Home() {
             Join professionals, students, and researchers who use AI to summarize documents in seconds.
           </p>
           <div className="mt-8 flex justify-center">
-            <CtaButton />
+            <CtaButton
+              onClick={(event) => {
+                if (authUser) return;
+                event.preventDefault();
+                setShowLogin(true);
+              }}
+            />
           </div>
         </div>
       </section>

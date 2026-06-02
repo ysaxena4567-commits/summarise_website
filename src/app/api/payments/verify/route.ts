@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAuthUserFromRequest } from "@/lib/auth";
 import { CASHFREE_PLAN, getCashfreeBaseUrl, getCashfreeHeaders } from "@/lib/cashfree";
 import { activateServerPro, normalizeEmail } from "@/lib/serverUsage";
 
@@ -33,7 +34,7 @@ function isValidOrderId(orderId: string) {
   return /^JFS_[a-zA-Z0-9_]+$/.test(orderId);
 }
 
-async function verifyOrder(orderId: string) {
+async function verifyOrder(orderId: string, signedInEmail: string) {
   const orderResponse = await fetch(`${getCashfreeBaseUrl()}/orders/${orderId}`, {
     method: "GET",
     headers: getCashfreeHeaders(),
@@ -61,8 +62,13 @@ async function verifyOrder(orderId: string) {
   const currencyMatches = order.order_currency === CASHFREE_PLAN.currency;
   const paid = order.order_status === "PAID" && Boolean(paidPayment) && amountMatches && currencyMatches;
   const customerEmail = normalizeEmail(order.customer_details?.customer_email);
+
+  if (!customerEmail || customerEmail !== signedInEmail) {
+    throw new Error("This payment does not match your signed-in account.");
+  }
+
   const activation =
-    paid && customerEmail
+    paid
       ? await activateServerPro(customerEmail, orderId, paidPayment?.cf_payment_id)
       : null;
 
@@ -90,7 +96,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A valid JustFlamsit order ID is required." }, { status: 400 });
     }
 
-    const result = await verifyOrder(orderId);
+    const verifiedUser = getAuthUserFromRequest(request);
+    const signedInEmail = normalizeEmail(verifiedUser?.email);
+
+    if (!signedInEmail) {
+      return NextResponse.json({ error: "Please sign in to verify this payment." }, { status: 401 });
+    }
+
+    const result = await verifyOrder(orderId, signedInEmail);
     const response = NextResponse.json(result);
 
     if (result.paid) {

@@ -48,12 +48,12 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as CreateOrderBody;
     const verifiedUser = getAuthUserFromRequest(request);
-    const customerEmail = normalizeEmail(verifiedUser?.email || body.customerEmail);
+    const customerEmail = normalizeEmail(verifiedUser?.email);
 
     if (!customerEmail) {
       return NextResponse.json(
-        { error: "Enter an email before starting Cashfree checkout." },
-        { status: 400 },
+        { error: "Please sign in before starting Cashfree checkout." },
+        { status: 401 },
       );
     }
 
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
         order_currency: CASHFREE_PLAN.currency,
         order_note: CASHFREE_PLAN.name,
         customer_details: {
-          customer_id: cleanCustomerId(body.customerEmail),
+          customer_id: cleanCustomerId(customerEmail),
           customer_name: body.customerName?.trim() || "JustFlamsit User",
           customer_email: customerEmail,
           customer_phone: cleanPhone(body.customerPhone),

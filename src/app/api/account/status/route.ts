@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAuthUserFromRequest } from "@/lib/auth";
 import { getServerAccount, normalizeEmail, remainingSummaries } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
@@ -10,10 +11,11 @@ type StatusBody = {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as StatusBody;
-    const email = normalizeEmail(body.email);
+    const verifiedUser = getAuthUserFromRequest(request);
+    const email = normalizeEmail(verifiedUser?.email || body.email);
 
     if (!email) {
-      return NextResponse.json({ error: "Email is required for account usage sync." }, { status: 400 });
+      return NextResponse.json({ error: "Please sign in to sync account usage." }, { status: 401 });
     }
 
     const { account, databaseBacked } = await getServerAccount(email);

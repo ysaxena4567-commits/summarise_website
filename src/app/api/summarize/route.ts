@@ -202,6 +202,16 @@ function extractGeminiText(response: unknown) {
 
 export async function POST(request: Request) {
   try {
+    const verifiedUser = getAuthUserFromRequest(request);
+    const customerEmail = normalizeEmail(verifiedUser?.email);
+
+    if (!customerEmail) {
+      return NextResponse.json(
+        { error: "Please sign in before generating summaries." },
+        { status: 401 },
+      );
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
@@ -212,15 +222,6 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
-    const verifiedUser = getAuthUserFromRequest(request);
-    const customerEmail = normalizeEmail(verifiedUser?.email || String(formData.get("customerEmail") || ""));
-
-    if (!customerEmail) {
-      return NextResponse.json(
-        { error: "Log in with your email before generating summaries." },
-        { status: 401 },
-      );
-    }
 
     const usageCheck = await getServerAccount(customerEmail);
 

@@ -5,7 +5,7 @@ export const GOOGLE_STATE_COOKIE_NAME = "justflamsit-google-state";
 
 export type ServerAuthUser = {
   email: string;
-  provider: "google";
+  provider: "email" | "google";
   name?: string;
   picture?: string;
   emailVerified: true;
@@ -61,7 +61,7 @@ export function parseAuthToken(token?: string | null): ServerAuthUser | null {
     const data = JSON.parse(fromBase64Url(payload)) as Partial<ServerAuthUser> & { iat?: number };
     const email = data.email?.trim().toLowerCase();
 
-    if (!email || data.provider !== "google" || data.emailVerified !== true) return null;
+    if (!email || (data.provider !== "google" && data.provider !== "email") || data.emailVerified !== true) return null;
 
     return {
       email,
