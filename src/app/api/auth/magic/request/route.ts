@@ -5,16 +5,20 @@ import { getServerAccount, normalizeEmail } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
-type EmailLoginBody = {
+type MagicRequestBody = {
   email?: string;
 };
 
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 export async function POST(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as EmailLoginBody;
+    const body = (await request.json().catch(() => ({}))) as MagicRequestBody;
     const email = normalizeEmail(body.email);
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!email || !isValidEmail(email)) {
       return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
     }
 
@@ -32,7 +36,7 @@ export async function POST(request: Request) {
       message: "Check your email for a secure JustFlamsit sign-in link.",
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not send the magic link right now.";
+    const message = error instanceof Error ? error.message : "Could not send the magic link. Please try again.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

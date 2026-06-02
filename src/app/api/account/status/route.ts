@@ -4,15 +4,10 @@ import { getServerAccount, normalizeEmail, remainingSummaries } from "@/lib/serv
 
 export const runtime = "nodejs";
 
-type StatusBody = {
-  email?: string;
-};
-
 export async function POST(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as StatusBody;
     const verifiedUser = getAuthUserFromRequest(request);
-    const email = normalizeEmail(verifiedUser?.email || body.email);
+    const email = normalizeEmail(verifiedUser?.email);
 
     if (!email) {
       return NextResponse.json({ error: "Please sign in to sync account usage." }, { status: 401 });

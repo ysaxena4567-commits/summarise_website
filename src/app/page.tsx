@@ -152,6 +152,10 @@ type AccountStatusResponse = {
 
 type AuthResponse = {
   user?: AuthUser | null;
+  ok?: boolean;
+  email?: string;
+  expiresInMinutes?: number;
+  message?: string;
   error?: string;
 };
 
@@ -382,17 +386,17 @@ function Logo() {
 }
 
 function LoginModal({
-  onLogin,
   onClose,
   initialError = "",
 }: {
-  onLogin: (user: AuthUser) => void;
   onClose: () => void;
   initialError?: string;
 }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState(initialError);
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [sentEmail, setSentEmail] = useState("");
+  const [expiresInMinutes, setExpiresInMinutes] = useState(15);
 
   const cleanEmail = email.trim().toLowerCase();
 
@@ -415,18 +419,14 @@ function LoginModal({
       });
       const data = (await response.json()) as AuthResponse;
 
-      if (!response.ok || !data.user?.email) {
-        throw new Error(data.error || "Sign-in could not be completed.");
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Magic link could not be sent.");
       }
 
-      onLogin({
-        email: data.user.email,
-        provider: data.user.provider || "email",
-        name: data.user.name,
-        emailVerified: true,
-      });
+      setSentEmail(data.email || cleanEmail);
+      setExpiresInMinutes(data.expiresInMinutes || 15);
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "Could not sign in. Please try again.");
+      setError(loginError instanceof Error ? loginError.message : "Could not send the sign-in link. Please try again.");
     } finally {
       setIsSigningIn(false);
     }
@@ -453,6 +453,34 @@ function LoginModal({
           </button>
         </div>
 
+        {sentEmail ? (
+          <div className="mt-6 rounded-xl border border-[#c5b358]/25 bg-[#c5b358]/[0.08] p-4">
+            <div className="flex items-start gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#c5b358] text-[#28282b]">
+                <Mail size={18} />
+              </span>
+              <div>
+                <h3 className="text-base font-semibold text-white">Check your email</h3>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
+                  We sent a secure sign-in link to <span className="font-semibold text-white">{sentEmail}</span>. Click it to open your verified JustFlamsit account.
+                </p>
+                <p className="mt-2 text-xs leading-5 text-[#f2e7a5]">
+                  The link expires in {expiresInMinutes} minutes and can be used once.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSentEmail("");
+                    setError("");
+                  }}
+                  className="mt-4 text-sm font-semibold text-white underline decoration-[#c5b358]/60 underline-offset-4 transition hover:text-[#f2e7a5]"
+                >
+                  Use a different email
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={loginWithEmail} className="mt-6 space-y-3">
           <label htmlFor="login-email" className="text-sm font-semibold text-zinc-200">
             Email address
@@ -485,6 +513,7 @@ function LoginModal({
             Your usage and Pro plan are synced to this email.
           </p>
         </form>
+        )}
       </div>
     </div>
   );
@@ -1743,6 +1772,8 @@ export default function Home() {
         setAuthError(
           authErrorCode === "google_not_configured"
             ? "Google login is ready, but Google OAuth keys are not configured yet."
+            : authErrorCode === "magic_link_invalid"
+              ? "That sign-in link is expired or already used. Please request a new one."
             : "Google login could not be completed. Please try again.",
         );
         setShowLogin(true);
@@ -1776,12 +1807,6 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  const handleLogin = (user: AuthUser) => {
-    window.localStorage.setItem("justflamsit-user", JSON.stringify(user));
-    setAuthUser(user);
-    setShowLogin(false);
-  };
-
   const handleLogout = () => {
     void fetch("/api/auth/logout", { method: "POST" });
     window.localStorage.removeItem("justflamsit-user");
@@ -1791,7 +1816,7 @@ export default function Home() {
 
   return (
     <main id="top" className="min-h-screen overflow-hidden bg-[#28282b] text-white">
-      {showLogin && !authUser && <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} initialError={authError} />}
+      {showLogin && !authUser && <LoginModal onClose={() => setShowLogin(false)} initialError={authError} />}
       {showPrivacyPolicy && <PrivacyPolicyModal onClose={() => setShowPrivacyPolicy(false)} />}
       {showTermsConditions && <TermsConditionsModal onClose={() => setShowTermsConditions(false)} />}
       {showRefundBilling && <RefundBillingModal onClose={() => setShowRefundBilling(false)} />}
