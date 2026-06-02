@@ -397,25 +397,25 @@ function LoginModal({
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [sentEmail, setSentEmail] = useState("");
   const [expiresInMinutes, setExpiresInMinutes] = useState(15);
+  const [resendMessage, setResendMessage] = useState("");
 
   const cleanEmail = email.trim().toLowerCase();
 
-  const loginWithEmail = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+  const requestMagicLink = async (targetEmail: string) => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
       setError("Enter a valid email address.");
       return;
     }
 
     setIsSigningIn(true);
     setError("");
+    setResendMessage("");
 
     try {
       const response = await fetch("/api/auth/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: cleanEmail }),
+        body: JSON.stringify({ email: targetEmail }),
       });
       const data = (await response.json()) as AuthResponse;
 
@@ -423,13 +423,19 @@ function LoginModal({
         throw new Error(data.error || "Magic link could not be sent.");
       }
 
-      setSentEmail(data.email || cleanEmail);
+      setSentEmail(data.email || targetEmail);
       setExpiresInMinutes(data.expiresInMinutes || 15);
+      setResendMessage("A fresh sign-in link was sent.");
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "Could not send the sign-in link. Please try again.");
     } finally {
       setIsSigningIn(false);
     }
+  };
+
+  const loginWithEmail = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await requestMagicLink(cleanEmail);
   };
 
   return (
@@ -467,16 +473,33 @@ function LoginModal({
                 <p className="mt-2 text-xs leading-5 text-[#f2e7a5]">
                   The link expires in {expiresInMinutes} minutes and can be used once.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSentEmail("");
-                    setError("");
-                  }}
-                  className="mt-4 text-sm font-semibold text-white underline decoration-[#c5b358]/60 underline-offset-4 transition hover:text-[#f2e7a5]"
-                >
-                  Use a different email
-                </button>
+                <p className="mt-2 text-xs leading-5 text-zinc-400">
+                  If it is not in your inbox, check Spam, Promotions, Updates, or search for “JustFlamsit”.
+                </p>
+                {resendMessage && <p className="mt-3 text-xs font-semibold text-emerald-200">{resendMessage}</p>}
+                {error && <p className="mt-3 text-xs font-semibold text-red-300">{error}</p>}
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => requestMagicLink(sentEmail)}
+                    disabled={isSigningIn}
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[#c5b358]/35 px-3 text-sm font-semibold text-white transition hover:border-[#c5b358] disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {isSigningIn ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
+                    Resend link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSentEmail("");
+                      setError("");
+                      setResendMessage("");
+                    }}
+                    className="inline-flex min-h-10 items-center justify-center rounded-lg px-3 text-sm font-semibold text-white underline decoration-[#c5b358]/60 underline-offset-4 transition hover:text-[#f2e7a5]"
+                  >
+                    Use a different email
+                  </button>
+                </div>
               </div>
             </div>
           </div>

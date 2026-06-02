@@ -23,7 +23,12 @@ export async function POST(request: Request) {
     await getServerAccount(email);
 
     const magicLink = `${getSiteUrl()}/api/auth/magic/verify?token=${encodeURIComponent(token)}`;
-    await sendMagicLinkEmail(email, magicLink);
+    const delivery = await sendMagicLinkEmail(email, magicLink);
+
+    console.info("JustFlamsit magic link accepted by Brevo", {
+      messageId: delivery.messageId || "unknown",
+      emailDomain: email.split("@")[1] || "unknown",
+    });
 
     return NextResponse.json({
       ok: true,

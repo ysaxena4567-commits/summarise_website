@@ -76,9 +76,14 @@ export async function sendMagicLinkEmail(email: string, magicLink: string) {
         email: fromEmail,
       },
       to: [{ email }],
+      replyTo: {
+        name: fromName,
+        email: fromEmail,
+      },
       subject: "Your JustFlamsit sign-in link",
       htmlContent: buildMagicLinkHtml(magicLink),
       textContent: `Sign in to JustFlamsit: ${magicLink}\n\nThis link expires in ${magicLinkExpiresMinutes()} minutes and can be used once.`,
+      tags: ["magic-link-login"],
     }),
   });
 
