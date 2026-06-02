@@ -54,6 +54,13 @@ const navItems = [
   { label: "FAQ", href: "#faq" },
 ];
 
+const socialLinks = [
+  { label: "Instagram", href: "https://instagram.com/justflamsit", mark: "IG" },
+  { label: "X / Twitter", href: "https://x.com/justflamsit", mark: "X" },
+  { label: "LinkedIn", href: "https://www.linkedin.com/in/justflamsit-ai-584423413/", mark: "in" },
+  { label: "GitHub", href: "https://github.com/justflamsit", mark: "GH" },
+];
+
 const heroBenefits = [
   "Save hours of reading",
   "Instant AI summaries",
@@ -2091,30 +2098,51 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="border-t border-white/10 bg-[#202024] px-4 py-10 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col gap-8 md:flex-row md:items-start md:justify-between">
-          <div>
-            <Logo />
-            <p className="mt-4 max-w-md text-sm leading-6 text-zinc-400">
-              AI-powered document, file, report, and assignment summarization for people who need concise, actionable insight.
-            </p>
-          </div>
-          <div className="grid gap-8 sm:grid-cols-3">
+      <footer className="border-t border-[#c5b358]/20 bg-[#151517] px-4 py-12 text-zinc-300 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid gap-10 lg:grid-cols-[1.15fr_0.85fr_0.85fr]">
             <div>
-              <h3 className="text-sm font-semibold text-white">Navigate</h3>
-              <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400">
-                {navItems.map((item) => <a key={item.href} href={item.href} className="hover:text-white">{item.label}</a>)}
-              </div>
+              <Logo />
+              <p className="mt-5 max-w-md text-base font-semibold text-white">
+                AI-powered document intelligence.
+              </p>
+              <p className="mt-2 max-w-md text-sm leading-7 text-zinc-400">
+                Turn hours of reading into minutes.
+              </p>
+              <a
+                href="mailto:support@justflamsit.com?subject=JustFlamsit%20Support%20Request&body=Hi%20JustFlamsit%20Support%2C%0A%0AI%20need%20help%20with%3A%0A%0A"
+                className="mt-6 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-[#c5b358]/60 hover:text-white"
+                aria-label="Email JustFlamsit support"
+              >
+                <Mail size={17} className="text-[#c5b358]" />
+                support@justflamsit.com
+              </a>
             </div>
+
             <div>
-              <h3 className="text-sm font-semibold text-white">Company</h3>
-              <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400">
-                <a
-                  href="mailto:support@justflamsit.com?subject=JustFlamsit%20Support%20Request&body=Hi%20JustFlamsit%20Support%2C%0A%0AI%20need%20help%20with%3A%0A%0A"
-                  className="hover:text-white"
-                >
-                  Contact
-                </a>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-[#c5b358]">Connect</h3>
+              <div className="mt-4 flex flex-wrap gap-3">
+                {socialLinks.map((item) => (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open JustFlamsit on ${item.label}`}
+                    className="grid size-11 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-xs font-bold text-zinc-200 transition hover:-translate-y-0.5 hover:border-[#c5b358]/70 hover:bg-[#c5b358] hover:text-[#28282b]"
+                  >
+                    {item.mark}
+                  </a>
+                ))}
+              </div>
+              <p className="mt-4 max-w-xs text-sm leading-6 text-zinc-500">
+                Follow product updates, launch notes, and document workflow tips.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-[#c5b358]">Legal</h3>
+              <div className="mt-4 flex flex-col gap-3 text-sm text-zinc-400">
                 <button
                   type="button"
                   onClick={() => setShowPrivacyPolicy(true)}
@@ -2127,29 +2155,27 @@ export default function Home() {
                   onClick={() => setShowTermsConditions(true)}
                   className="w-fit text-left transition hover:text-white"
                 >
-                  Terms &amp; Conditions
+                  Terms of Service
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowRefundBilling(true)}
                   className="w-fit text-left transition hover:text-white"
                 >
-                  Refund &amp; Billing Policy
+                  Refund Policy
                 </button>
               </div>
             </div>
-            <div>
-              <h3 className="text-sm font-semibold text-white">Trust</h3>
-              <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400">
-                <span>Secure uploads</span>
-                <span>Privacy focused</span>
-                <span>Enterprise ready</span>
-              </div>
+          </div>
+
+          <div className="mt-10 flex flex-col gap-3 border-t border-white/10 pt-6 text-sm text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
+            <p>© 2026 JustFlamsit. All rights reserved.</p>
+            <div className="flex flex-wrap gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#c5b358]/80">
+              <span>Secure Processing</span>
+              <span>Privacy Focused</span>
+              <span>Powered by AI</span>
             </div>
           </div>
-        </div>
-        <div className="mx-auto mt-10 max-w-7xl border-t border-white/10 pt-6 text-sm text-zinc-500">
-          Copyright 2026 JustFlamsit. All rights reserved.
         </div>
       </footer>
     </main>
