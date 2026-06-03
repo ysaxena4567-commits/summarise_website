@@ -84,7 +84,7 @@ function PaymentSuccessContent() {
                 {status === "loading"
                   ? "Please wait while JustFlamsit confirms your payment securely with Cashfree."
                   : paid
-                    ? `Your payment was verified server-side. JustFlamsit Pro is active with ${PRO_MONTHLY_SUMMARY_LIMIT} summaries remaining this month.`
+                    ? `Your payment was verified server-side. JustFlamsit Pro is active with ${PRO_MONTHLY_SUMMARY_LIMIT} summaries for the next 30 days.`
                     : details.error || "Cashfree has not marked this order as paid yet."}
               </p>
             </div>

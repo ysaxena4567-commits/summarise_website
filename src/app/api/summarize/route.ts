@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import mammoth from "mammoth";
 import PDFParser from "pdf2json";
 import { getAuthUserFromRequest } from "@/lib/auth";
-import { consumeServerSummary, getServerAccount, normalizeEmail, remainingSummaries } from "@/lib/serverUsage";
+import {
+  consumeServerSummary,
+  getServerAccount,
+  normalizeEmail,
+  refundServerSummary,
+  remainingSummaries,
+} from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
@@ -272,45 +278,66 @@ export async function POST(request: Request) {
       );
     }
 
-    const prompt = buildPrompt(availableDocuments, instructions);
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0,
-            topP: 0.2,
-            maxOutputTokens: 4096,
-            responseMimeType: "application/json",
-          },
-        }),
-      },
-    );
-
-    const data = await geminiResponse.json();
-
-    if (!geminiResponse.ok) {
-      const message =
-        typeof data?.error?.message === "string"
-          ? data.error.message
-          : "Gemini summarization failed.";
-      return NextResponse.json({ error: message }, { status: geminiResponse.status });
-    }
-
     const usage = await consumeServerSummary(customerEmail);
 
+    if (!usage.allowed) {
+      return NextResponse.json(
+        {
+          error: "You have reached your summary limit. Upgrade to JustFlamsit Pro to continue.",
+          usage: usage.account,
+          databaseBacked: usage.databaseBacked,
+          upgradeRequired: true,
+        },
+        { status: 402 },
+      );
+    }
+
+    let summary: string;
+
+    try {
+      const prompt = buildPrompt(availableDocuments, instructions);
+      const geminiResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: prompt }],
+              },
+            ],
+            generationConfig: {
+              temperature: 0,
+              topP: 0.2,
+              maxOutputTokens: 4096,
+              responseMimeType: "application/json",
+            },
+          }),
+        },
+      );
+
+      const data = await geminiResponse.json();
+
+      if (!geminiResponse.ok) {
+        const message =
+          typeof data?.error?.message === "string"
+            ? data.error.message
+            : "Gemini summarization failed.";
+        throw new Error(message);
+      }
+
+      summary = extractGeminiText(data);
+    } catch (error) {
+      await refundServerSummary(customerEmail);
+      throw error;
+    }
+
     return NextResponse.json({
-      summary: extractGeminiText(data),
+      summary,
       documents: availableDocuments.map((document) => ({
         name: document.name,
         characters: document.text.length,

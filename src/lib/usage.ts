@@ -1,5 +1,6 @@
 export const FREE_SUMMARY_LIMIT = 3;
 export const PRO_MONTHLY_SUMMARY_LIMIT = 50;
+export const PRO_ACCESS_DAYS = 30;
 export const USAGE_STORAGE_KEY = "justflamsit-usage";
 export const PLAN_STORAGE_KEY = "justflamsit-plan";
 
@@ -26,17 +27,8 @@ function currentMonthKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function addOneMonth(date: Date) {
-  const next = new Date(date);
-  const originalDay = next.getDate();
-
-  next.setDate(1);
-  next.setMonth(next.getMonth() + 1);
-
-  const lastDayOfTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-  next.setDate(Math.min(originalDay, lastDayOfTargetMonth));
-
-  return next;
+function addThirtyDays(date: Date) {
+  return new Date(date.getTime() + PRO_ACCESS_DAYS * 24 * 60 * 60 * 1000);
 }
 
 function isExpired(date?: string) {
@@ -80,7 +72,7 @@ export function getUsageState(): UsageState {
   const monthKey = currentMonthKey();
   const fallbackExpiresAt =
     storedPlan?.activatedAt && storedPlan.plan === "pro"
-      ? addOneMonth(new Date(storedPlan.activatedAt)).toISOString()
+      ? addThirtyDays(new Date(storedPlan.activatedAt)).toISOString()
       : undefined;
   const proExpiresAt = storedUsage?.proExpiresAt || storedPlan?.proExpiresAt || fallbackExpiresAt;
   const proExpired =
@@ -137,7 +129,7 @@ export function recordSuccessfulSummary(usage: UsageState) {
 
 export function activateProPlan(orderId: string, paymentId?: string | null) {
   const activatedAt = new Date();
-  const proExpiresAt = addOneMonth(activatedAt).toISOString();
+  const proExpiresAt = addThirtyDays(activatedAt).toISOString();
   const plan: StoredPlan = {
     plan: "pro",
     orderId,

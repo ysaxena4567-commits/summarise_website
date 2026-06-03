@@ -120,11 +120,20 @@ async function verifyOrderWithCashfree(orderId: string) {
     (payment) => payment.payment_status === "SUCCESS" || payment.is_captured === true,
   );
   const orderPaid = order.order_status === "PAID";
-  const amountMatches = Number(order.order_amount) === CASHFREE_PLAN.amount;
-  const currencyMatches = order.order_currency === CASHFREE_PLAN.currency;
+  const orderAmountMatches = Number(order.order_amount) === CASHFREE_PLAN.amount;
+  const orderCurrencyMatches = order.order_currency === CASHFREE_PLAN.currency;
+  const paymentAmountMatches = Number(paidPayment?.payment_amount) === CASHFREE_PLAN.amount;
+  const paymentCurrencyMatches = paidPayment?.payment_currency === CASHFREE_PLAN.currency;
 
   return {
-    paid: Boolean(orderPaid && paidPayment && amountMatches && currencyMatches),
+    paid: Boolean(
+      orderPaid &&
+        paidPayment &&
+        orderAmountMatches &&
+        orderCurrencyMatches &&
+        paymentAmountMatches &&
+        paymentCurrencyMatches,
+    ),
     email: normalizeEmail(order.customer_details?.customer_email || paidPayment?.customer_email),
     paymentId: paidPayment?.cf_payment_id ?? null,
   };

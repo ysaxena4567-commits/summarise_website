@@ -58,9 +58,17 @@ async function verifyOrder(orderId: string, signedInEmail: string) {
     (payment) => payment.payment_status === "SUCCESS" || payment.is_captured === true,
   );
 
-  const amountMatches = Number(order.order_amount) === CASHFREE_PLAN.amount;
-  const currencyMatches = order.order_currency === CASHFREE_PLAN.currency;
-  const paid = order.order_status === "PAID" && Boolean(paidPayment) && amountMatches && currencyMatches;
+  const orderAmountMatches = Number(order.order_amount) === CASHFREE_PLAN.amount;
+  const orderCurrencyMatches = order.order_currency === CASHFREE_PLAN.currency;
+  const paymentAmountMatches = Number(paidPayment?.payment_amount) === CASHFREE_PLAN.amount;
+  const paymentCurrencyMatches = paidPayment?.payment_currency === CASHFREE_PLAN.currency;
+  const paid =
+    order.order_status === "PAID" &&
+    Boolean(paidPayment) &&
+    orderAmountMatches &&
+    orderCurrencyMatches &&
+    paymentAmountMatches &&
+    paymentCurrencyMatches;
   const customerEmail = normalizeEmail(order.customer_details?.customer_email);
 
   if (!customerEmail || customerEmail !== signedInEmail) {

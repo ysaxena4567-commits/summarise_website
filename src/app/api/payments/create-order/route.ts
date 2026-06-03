@@ -34,6 +34,12 @@ function cleanCustomerId(email?: string) {
 }
 
 function getOrigin(request: Request) {
+  const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+
+  if (configuredSiteUrl) {
+    return configuredSiteUrl;
+  }
+
   const forwardedHost = request.headers.get("x-forwarded-host");
   const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
 

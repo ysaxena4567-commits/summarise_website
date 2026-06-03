@@ -1,7 +1,8 @@
-import { get, put } from "@vercel/blob";
+import { del, get, put } from "@vercel/blob";
 import { Redis } from "@upstash/redis";
 import {
   FREE_SUMMARY_LIMIT,
+  PRO_ACCESS_DAYS,
   PRO_MONTHLY_SUMMARY_LIMIT,
   type UsageState,
 } from "@/lib/usage";
@@ -21,6 +22,11 @@ type ConsumeResult = {
   databaseBacked: boolean;
 };
 
+type AccountMutationResult = {
+  account: AccountRecord;
+  databaseBacked: boolean;
+};
+
 type AccountStore =
   | { kind: "redis"; client: Redis }
   | { kind: "blob" }
@@ -33,17 +39,8 @@ function monthKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function addOneMonth(date: Date) {
-  const next = new Date(date);
-  const originalDay = next.getDate();
-
-  next.setDate(1);
-  next.setMonth(next.getMonth() + 1);
-
-  const lastDayOfTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-  next.setDate(Math.min(originalDay, lastDayOfTargetMonth));
-
-  return next;
+function addThirtyDays(date: Date) {
+  return new Date(date.getTime() + PRO_ACCESS_DAYS * 24 * 60 * 60 * 1000);
 }
 
 function isExpired(date?: string) {
@@ -60,6 +57,14 @@ function accountKey(email: string) {
 
 function accountBlobPath(email: string) {
   return `accounts/${Buffer.from(email).toString("base64url")}.json`;
+}
+
+function accountLockKey(email: string) {
+  return `justflamsit:account-lock:${email}`;
+}
+
+function accountLockBlobPath(email: string) {
+  return `accounts/locks/${Buffer.from(email).toString("base64url")}.lock`;
 }
 
 function legacyAccountBlobPaths(email: string) {
@@ -107,7 +112,7 @@ function normalizeAccount(email: string, account?: Partial<AccountRecord> | null
   const rawPlan = account?.plan === "pro" ? "pro" : "free";
   const fallbackExpiresAt =
     rawPlan === "pro" && account?.proActivatedAt
-      ? addOneMonth(new Date(account.proActivatedAt)).toISOString()
+      ? addThirtyDays(new Date(account.proActivatedAt)).toISOString()
       : undefined;
   const proExpiresAt = account?.proExpiresAt || fallbackExpiresAt;
   const proExpired = rawPlan === "pro" && isExpired(proExpiresAt);
@@ -186,6 +191,96 @@ async function writeAccount(account: AccountRecord) {
   });
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireAccountLock(email: string, store: Exclude<AccountStore, null>) {
+  const lockValue = crypto.randomUUID();
+  const lockExpiresAt = Date.now() + 15_000;
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    try {
+      if (store.kind === "redis") {
+        const acquired = await store.client.set(accountLockKey(email), lockValue, {
+          nx: true,
+          ex: 15,
+        });
+
+        if (acquired) {
+          return { kind: "redis" as const, key: accountLockKey(email), value: lockValue, client: store.client };
+        }
+      } else {
+        const path = accountLockBlobPath(email);
+        await put(path, JSON.stringify({ value: lockValue, expiresAt: lockExpiresAt }), {
+          access: "private",
+          addRandomSuffix: false,
+          allowOverwrite: false,
+          contentType: "application/json",
+        });
+        return { kind: "blob" as const, path, value: lockValue };
+      }
+    } catch {
+      // Another request owns the lock. Retry briefly so concurrent payments/summaries serialize per account.
+      if (store.kind === "blob") {
+        try {
+          const path = accountLockBlobPath(email);
+          const blob = await get(path, { access: "private", useCache: false });
+          const text = blob?.statusCode === 200 ? await new Response(blob.stream).text() : "";
+          const lock = JSON.parse(text) as { expiresAt?: number };
+
+          if (Number(lock.expiresAt ?? 0) <= Date.now()) {
+            await del(path);
+          }
+        } catch {
+          // Keep retrying; the active request may still finish and release the lock.
+        }
+      }
+    }
+
+    await wait(125 + Math.floor(Math.random() * 125));
+  }
+
+  throw new Error("Your account is already processing another request. Please try again in a few seconds.");
+}
+
+async function releaseAccountLock(lock: Awaited<ReturnType<typeof acquireAccountLock>>) {
+  try {
+    if (lock.kind === "redis") {
+      const currentValue = await lock.client.get<string>(lock.key);
+      if (currentValue === lock.value) {
+        await lock.client.del(lock.key);
+      }
+      return;
+    }
+
+    const blob = await get(lock.path, { access: "private", useCache: false });
+    const text = blob?.statusCode === 200 ? await new Response(blob.stream).text() : "";
+    const currentLock = JSON.parse(text) as { value?: string };
+
+    if (currentLock.value === lock.value) {
+      await del(lock.path);
+    }
+  } catch {
+    // Lock expiry/cleanup is best-effort; Redis locks expire automatically and Blob locks are retried around.
+  }
+}
+
+async function withAccountLock<T>(email: string, task: () => Promise<T>) {
+  const store = getAccountStore();
+
+  if (!store) return task();
+
+  const lock = await acquireAccountLock(email, store);
+
+  try {
+    return await task();
+  } finally {
+    await releaseAccountLock(lock);
+  }
+}
+
 export async function getServerAccount(email: string) {
   const normalizedEmail = normalizeEmail(email);
   const store = getAccountStore();
@@ -209,23 +304,48 @@ export async function consumeServerSummary(email: string): Promise<ConsumeResult
     return { allowed: true, account: freshAccount(normalizedEmail), databaseBacked: false };
   }
 
-  const stored = await readAccount(normalizedEmail);
-  const account = normalizeAccount(normalizedEmail, stored);
+  return withAccountLock(normalizedEmail, async () => {
+    const stored = await readAccount(normalizedEmail);
+    const account = normalizeAccount(normalizedEmail, stored);
 
-  if (remainingSummaries(account) <= 0) {
-    await writeAccount(account);
-    return { allowed: false, account, databaseBacked: true };
+    if (remainingSummaries(account) <= 0) {
+      await writeAccount(account);
+      return { allowed: false, account, databaseBacked: true };
+    }
+
+    const nextAccount: AccountRecord = {
+      ...account,
+      freeUsed: account.plan === "free" ? Math.min(account.freeUsed + 1, FREE_SUMMARY_LIMIT) : account.freeUsed,
+      proUsed: account.plan === "pro" ? Math.min(account.proUsed + 1, PRO_MONTHLY_SUMMARY_LIMIT) : account.proUsed,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await writeAccount(nextAccount);
+    return { allowed: true, account: nextAccount, databaseBacked: true };
+  });
+}
+
+export async function refundServerSummary(email: string): Promise<AccountMutationResult> {
+  const normalizedEmail = normalizeEmail(email);
+  const store = getAccountStore();
+
+  if (!normalizedEmail || !store) {
+    return { account: freshAccount(normalizedEmail), databaseBacked: false };
   }
 
-  const nextAccount: AccountRecord = {
-    ...account,
-    freeUsed: account.plan === "free" ? Math.min(account.freeUsed + 1, FREE_SUMMARY_LIMIT) : account.freeUsed,
-    proUsed: account.plan === "pro" ? Math.min(account.proUsed + 1, PRO_MONTHLY_SUMMARY_LIMIT) : account.proUsed,
-    updatedAt: new Date().toISOString(),
-  };
+  return withAccountLock(normalizedEmail, async () => {
+    const stored = await readAccount(normalizedEmail);
+    const account = normalizeAccount(normalizedEmail, stored);
+    const nextAccount: AccountRecord = {
+      ...account,
+      freeUsed: account.plan === "free" ? Math.max(account.freeUsed - 1, 0) : account.freeUsed,
+      proUsed: account.plan === "pro" ? Math.max(account.proUsed - 1, 0) : account.proUsed,
+      updatedAt: new Date().toISOString(),
+    };
 
-  await writeAccount(nextAccount);
-  return { allowed: true, account: nextAccount, databaseBacked: true };
+    await writeAccount(nextAccount);
+    return { account: nextAccount, databaseBacked: true };
+  });
 }
 
 export async function activateServerPro(email: string, orderId: string, paymentId?: string | null) {
@@ -236,26 +356,28 @@ export async function activateServerPro(email: string, orderId: string, paymentI
     return { account: freshAccount(normalizedEmail), databaseBacked: false };
   }
 
-  const stored = await readAccount(normalizedEmail);
-  const account = normalizeAccount(normalizedEmail, stored);
-  const activatedAt = new Date();
+  return withAccountLock(normalizedEmail, async () => {
+    const stored = await readAccount(normalizedEmail);
+    const account = normalizeAccount(normalizedEmail, stored);
+    const activatedAt = new Date();
 
-  if (account.plan === "pro" && account.lastPaymentOrderId === orderId) {
-    return { account, databaseBacked: true };
-  }
+    if (account.plan === "pro" && account.lastPaymentOrderId === orderId) {
+      return { account, databaseBacked: true };
+    }
 
-  const nextAccount: AccountRecord = {
-    ...account,
-    plan: "pro",
-    proUsed: 0,
-    monthKey: monthKey(),
-    proActivatedAt: activatedAt.toISOString(),
-    proExpiresAt: addOneMonth(activatedAt).toISOString(),
-    lastPaymentOrderId: orderId,
-    lastPaymentId: paymentId,
-    updatedAt: new Date().toISOString(),
-  };
+    const nextAccount: AccountRecord = {
+      ...account,
+      plan: "pro",
+      proUsed: 0,
+      monthKey: monthKey(),
+      proActivatedAt: activatedAt.toISOString(),
+      proExpiresAt: addThirtyDays(activatedAt).toISOString(),
+      lastPaymentOrderId: orderId,
+      lastPaymentId: paymentId,
+      updatedAt: new Date().toISOString(),
+    };
 
-  await writeAccount(nextAccount);
-  return { account: nextAccount, databaseBacked: true };
+    await writeAccount(nextAccount);
+    return { account: nextAccount, databaseBacked: true };
+  });
 }

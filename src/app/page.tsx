@@ -814,7 +814,7 @@ function formatUsageLabel(usage: UsageState) {
   const remaining = getRemainingSummaries(usage);
 
   if (usage.plan === "pro") {
-    return `${remaining} summaries remaining this month`;
+    return `${remaining} summaries remaining in your Pro period`;
   }
 
   return `${remaining} of ${FREE_SUMMARY_LIMIT} free summaries remaining`;
