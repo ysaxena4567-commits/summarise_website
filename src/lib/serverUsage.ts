@@ -10,6 +10,7 @@ type AccountRecord = UsageState & {
   email: string;
   updatedAt: string;
   proActivatedAt?: string;
+  proExpiresAt?: string;
   lastPaymentOrderId?: string;
   lastPaymentId?: string | null;
 };
@@ -30,6 +31,23 @@ let accountStore: AccountStore | undefined;
 function monthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function addOneMonth(date: Date) {
+  const next = new Date(date);
+  const originalDay = next.getDate();
+
+  next.setDate(1);
+  next.setMonth(next.getMonth() + 1);
+
+  const lastDayOfTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  next.setDate(Math.min(originalDay, lastDayOfTargetMonth));
+
+  return next;
+}
+
+function isExpired(date?: string) {
+  return Boolean(date && Number.isFinite(Date.parse(date)) && Date.parse(date) <= Date.now());
 }
 
 export function normalizeEmail(email?: string | null) {
@@ -86,18 +104,29 @@ function freshAccount(email: string): AccountRecord {
 
 function normalizeAccount(email: string, account?: Partial<AccountRecord> | null): AccountRecord {
   const currentMonth = monthKey();
+  const rawPlan = account?.plan === "pro" ? "pro" : "free";
+  const fallbackExpiresAt =
+    rawPlan === "pro" && account?.proActivatedAt
+      ? addOneMonth(new Date(account.proActivatedAt)).toISOString()
+      : undefined;
+  const proExpiresAt = account?.proExpiresAt || fallbackExpiresAt;
+  const proExpired = rawPlan === "pro" && isExpired(proExpiresAt);
+  const plan: UsageState["plan"] = rawPlan === "pro" && !proExpired ? "pro" : "free";
   const normalized: AccountRecord = {
     ...freshAccount(email),
     ...account,
     email,
-    plan: account?.plan === "pro" ? "pro" : "free",
-    freeUsed: Math.min(Math.max(Number(account?.freeUsed ?? 0), 0), FREE_SUMMARY_LIMIT),
-    proUsed: Math.max(Number(account?.proUsed ?? 0), 0),
+    plan,
+    freeUsed: proExpired
+      ? FREE_SUMMARY_LIMIT
+      : Math.min(Math.max(Number(account?.freeUsed ?? 0), 0), FREE_SUMMARY_LIMIT),
+    proUsed: plan === "pro" ? Math.max(Number(account?.proUsed ?? 0), 0) : 0,
     monthKey: account?.monthKey || currentMonth,
+    proExpiresAt: plan === "pro" ? proExpiresAt : undefined,
     updatedAt: new Date().toISOString(),
   };
 
-  if (normalized.monthKey !== currentMonth) {
+  if (normalized.plan === "free" && normalized.monthKey !== currentMonth) {
     normalized.monthKey = currentMonth;
     normalized.proUsed = 0;
   }
@@ -209,6 +238,7 @@ export async function activateServerPro(email: string, orderId: string, paymentI
 
   const stored = await readAccount(normalizedEmail);
   const account = normalizeAccount(normalizedEmail, stored);
+  const activatedAt = new Date();
 
   if (account.plan === "pro" && account.lastPaymentOrderId === orderId) {
     return { account, databaseBacked: true };
@@ -219,7 +249,8 @@ export async function activateServerPro(email: string, orderId: string, paymentI
     plan: "pro",
     proUsed: 0,
     monthKey: monthKey(),
-    proActivatedAt: new Date().toISOString(),
+    proActivatedAt: activatedAt.toISOString(),
+    proExpiresAt: addOneMonth(activatedAt).toISOString(),
     lastPaymentOrderId: orderId,
     lastPaymentId: paymentId,
     updatedAt: new Date().toISOString(),
