@@ -5,6 +5,9 @@ import { activateServerPro, normalizeEmail } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
+const MAX_WEBHOOK_BYTES = 64 * 1024;
+const WEBHOOK_REPLAY_WINDOW_MS = 5 * 60 * 1000;
+
 type CashfreeWebhookPayload = {
   type?: string;
   event?: string;
@@ -61,8 +64,12 @@ function timingSafeEqual(left: string, right: string) {
 
 function verifyCashfreeSignature(rawBody: string, signature: string | null, timestamp: string | null) {
   const secret = getWebhookSecret();
+  const timestampMs = timestamp ? Number(timestamp) * 1000 : 0;
 
   if (!secret || !signature || !timestamp) return false;
+  if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > WEBHOOK_REPLAY_WINDOW_MS) {
+    return false;
+  }
 
   const computedSignature = crypto
     .createHmac("sha256", secret)
@@ -145,7 +152,18 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const contentLength = Number(request.headers.get("content-length") || 0);
+
+    if (contentLength > MAX_WEBHOOK_BYTES) {
+      return NextResponse.json({ error: "Webhook payload is too large." }, { status: 413 });
+    }
+
     const rawBody = await request.text();
+
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_WEBHOOK_BYTES) {
+      return NextResponse.json({ error: "Webhook payload is too large." }, { status: 413 });
+    }
+
     const signature = request.headers.get("x-webhook-signature");
     const timestamp = request.headers.get("x-webhook-timestamp");
 

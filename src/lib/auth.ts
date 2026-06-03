@@ -11,6 +11,8 @@ export type ServerAuthUser = {
   emailVerified: true;
 };
 
+const AUTH_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+
 function base64Url(input: string) {
   return Buffer.from(input).toString("base64url");
 }
@@ -20,7 +22,7 @@ function fromBase64Url(input: string) {
 }
 
 function authSecret() {
-  return process.env.AUTH_SECRET || process.env.GOOGLE_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "";
+  return process.env.AUTH_SECRET || "";
 }
 
 function sign(value: string) {
@@ -45,6 +47,7 @@ export function createAuthToken(user: ServerAuthUser) {
     JSON.stringify({
       ...user,
       iat: Date.now(),
+      exp: Date.now() + AUTH_MAX_AGE_MS,
     }),
   );
 
@@ -58,10 +61,11 @@ export function parseAuthToken(token?: string | null): ServerAuthUser | null {
   if (!payload || !signature || !safeEqual(sign(payload), signature)) return null;
 
   try {
-    const data = JSON.parse(fromBase64Url(payload)) as Partial<ServerAuthUser> & { iat?: number };
+    const data = JSON.parse(fromBase64Url(payload)) as Partial<ServerAuthUser> & { exp?: number; iat?: number };
     const email = data.email?.trim().toLowerCase();
 
     if (!email || (data.provider !== "google" && data.provider !== "email") || data.emailVerified !== true) return null;
+    if (!data.exp || data.exp <= Date.now()) return null;
 
     return {
       email,

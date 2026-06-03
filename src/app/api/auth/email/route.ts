@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME, createAuthToken, secureCookieOptions } from "@/lib/auth";
+import { clientIp, rateLimit, readJsonWithLimit, requireSameOrigin } from "@/lib/security";
 import { getServerAccount, normalizeEmail } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
@@ -10,7 +11,17 @@ type EmailLoginBody = {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as EmailLoginBody;
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
+
+    const rateLimitError = rateLimit({
+      key: `auth-email:${clientIp(request)}`,
+      limit: 8,
+      windowMs: 15 * 60 * 1000,
+    });
+    if (rateLimitError) return rateLimitError;
+
+    const body = await readJsonWithLimit<EmailLoginBody>(request, 2_048);
     const email = normalizeEmail(body.email);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {

@@ -7,6 +7,7 @@ import {
 } from "@/lib/cashfree";
 import { getAuthUserFromRequest } from "@/lib/auth";
 import { normalizeEmail } from "@/lib/serverUsage";
+import { clientIp, rateLimit, readJsonWithLimit, requireSameOrigin } from "@/lib/security";
 
 export const runtime = "nodejs";
 
@@ -52,9 +53,19 @@ function getOrigin(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as CreateOrderBody;
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
+
     const verifiedUser = getAuthUserFromRequest(request);
     const customerEmail = normalizeEmail(verifiedUser?.email);
+    const rateLimitError = rateLimit({
+      key: `payment-create:${customerEmail || clientIp(request)}`,
+      limit: 6,
+      windowMs: 10 * 60 * 1000,
+    });
+    if (rateLimitError) return rateLimitError;
+
+    const body = await readJsonWithLimit<CreateOrderBody>(request, 4_096);
 
     if (!customerEmail) {
       return NextResponse.json(

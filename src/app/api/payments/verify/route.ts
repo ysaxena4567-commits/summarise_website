@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthUserFromRequest } from "@/lib/auth";
 import { CASHFREE_PLAN, getCashfreeBaseUrl, getCashfreeHeaders } from "@/lib/cashfree";
 import { activateServerPro, normalizeEmail } from "@/lib/serverUsage";
+import { clientIp, rateLimit, readJsonWithLimit, requireSameOrigin } from "@/lib/security";
 
 export const runtime = "nodejs";
 
@@ -97,15 +98,24 @@ async function verifyOrder(orderId: string, signedInEmail: string) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as VerifyBody;
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
+
+    const verifiedUser = getAuthUserFromRequest(request);
+    const signedInEmail = normalizeEmail(verifiedUser?.email);
+    const rateLimitError = rateLimit({
+      key: `payment-verify:${signedInEmail || clientIp(request)}`,
+      limit: 12,
+      windowMs: 10 * 60 * 1000,
+    });
+    if (rateLimitError) return rateLimitError;
+
+    const body = await readJsonWithLimit<VerifyBody>(request, 2_048);
     const orderId = body.orderId?.trim();
 
     if (!orderId || !isValidOrderId(orderId)) {
       return NextResponse.json({ error: "A valid JustFlamsit order ID is required." }, { status: 400 });
     }
-
-    const verifiedUser = getAuthUserFromRequest(request);
-    const signedInEmail = normalizeEmail(verifiedUser?.email);
 
     if (!signedInEmail) {
       return NextResponse.json({ error: "Please sign in to verify this payment." }, { status: 401 });

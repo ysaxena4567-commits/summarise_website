@@ -9,12 +9,14 @@ import {
   refundServerSummary,
   remainingSummaries,
 } from "@/lib/serverUsage";
+import { clientIp, rateLimit, requireSameOrigin } from "@/lib/security";
 
 export const runtime = "nodejs";
 
 const GEMINI_MODEL = "gemini-2.5-flash-lite";
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_REQUEST_BYTES = MAX_FILES * MAX_FILE_BYTES + 256_000;
 const MAX_TEXT_CHARS = 240_000;
 const MAX_INSTRUCTION_CHARS = 1_000;
 
@@ -220,8 +222,17 @@ function extractGeminiText(response: unknown) {
 
 export async function POST(request: Request) {
   try {
+    const originError = requireSameOrigin(request);
+    if (originError) return originError;
+
     const verifiedUser = getAuthUserFromRequest(request);
     const customerEmail = normalizeEmail(verifiedUser?.email);
+    const rateLimitError = rateLimit({
+      key: `summarize:${customerEmail || clientIp(request)}`,
+      limit: 12,
+      windowMs: 10 * 60 * 1000,
+    });
+    if (rateLimitError) return rateLimitError;
 
     if (!customerEmail) {
       return NextResponse.json(
@@ -237,6 +248,12 @@ export async function POST(request: Request) {
         { error: "GEMINI_API_KEY is not configured on the server." },
         { status: 500 },
       );
+    }
+
+    const contentLength = Number(request.headers.get("content-length") || 0);
+
+    if (contentLength > MAX_REQUEST_BYTES) {
+      return NextResponse.json({ error: "Upload up to 5 files with a 10MB limit per file." }, { status: 413 });
     }
 
     const formData = await request.formData();
