@@ -59,6 +59,7 @@ const socialLinks = [
   { label: "X / Twitter", href: "https://x.com/justflamsit", mark: "X" },
   { label: "LinkedIn", href: "https://www.linkedin.com/in/justflamsit-ai-584423413/", mark: "in" },
   { label: "GitHub", href: "https://github.com/justflamsit", mark: "GH" },
+  { label: "Reddit", href: "https://www.reddit.com/r/JustFlamsit/", mark: "RD" },
 ];
 
 const heroBenefits = [
