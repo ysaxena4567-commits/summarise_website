@@ -1241,6 +1241,23 @@ function SummarizerSection({
                 </>
               )}
             </button>
+
+            <div className="mt-5 grid gap-2 sm:grid-cols-2">
+              {[
+                "3 Free AI Summaries",
+                "No Credit Card Required",
+                "Private & Secure",
+                "Built for Students, Researchers & Professionals",
+              ].map((item) => (
+                <div
+                  key={item}
+                  className="flex min-w-0 items-center gap-2 rounded-lg border border-[#c5b358]/20 bg-[#c5b358]/[0.06] px-3 py-2 text-xs font-semibold leading-5 text-zinc-200 sm:text-sm"
+                >
+                  <Check size={15} className="shrink-0 text-[#c5b358]" />
+                  <span className="min-w-0">{item}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-[#161618] p-4 shadow-2xl shadow-black/20 sm:p-5">
