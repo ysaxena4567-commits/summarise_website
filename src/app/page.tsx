@@ -2089,17 +2089,6 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="px-4 py-16 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-4xl text-center">
-          <p className="text-2xl font-semibold leading-9 text-white sm:text-3xl">
-            JustFlamsit is currently in early access.
-          </p>
-          <p className="mt-4 text-lg leading-8 text-zinc-300">
-            We&apos;re actively improving AI summaries based on user feedback.
-          </p>
-        </div>
-      </section>
-
       <section id="faq" className="border-y border-white/10 bg-[#202024] px-4 py-20 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-4xl">
           <SectionIntro eyebrow="FAQ" title="Questions before your first summary" copy="Clear answers for visitors who need speed, trust, and practical document support before they start." />
