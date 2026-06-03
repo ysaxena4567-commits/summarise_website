@@ -889,6 +889,7 @@ function SummarizerSection({
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [summary, setSummary] = useState("");
   const [error, setError] = useState("");
+  const [summaryInstructions, setSummaryInstructions] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1031,6 +1032,7 @@ function SummarizerSection({
       const formData = new FormData();
       uploadedFiles.forEach(({ file }) => formData.append("files", file));
       formData.append("customerEmail", authUser.email);
+      formData.append("instructions", summaryInstructions.trim());
 
       const response = await fetch("/api/summarize", {
         method: "POST",
@@ -1218,6 +1220,24 @@ function SummarizerSection({
                 {error}
               </div>
             )}
+
+            <div className="mt-5">
+              <label htmlFor="summary-instructions" className="text-sm font-semibold text-white">
+                Add instructions for your summary
+              </label>
+              <textarea
+                id="summary-instructions"
+                value={summaryInstructions}
+                onChange={(event) => setSummaryInstructions(event.target.value)}
+                rows={4}
+                maxLength={1000}
+                placeholder="Example: Make it short, include key points, focus on deadlines, explain like a student, or extract action items."
+                className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/10 bg-[#0f0f11] px-4 py-3 text-sm leading-6 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70 focus:ring-2 focus:ring-[#c5b358]/15"
+              />
+              <p className="mt-2 text-xs leading-5 text-zinc-500">
+                Optional. Leave blank for the standard JustFlamsit summary format.
+              </p>
+            </div>
 
             <button
               type="button"

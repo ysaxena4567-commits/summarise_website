@@ -10,6 +10,7 @@ const GEMINI_MODEL = "gemini-2.5-flash-lite";
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TEXT_CHARS = 240_000;
+const MAX_INSTRUCTION_CHARS = 1_000;
 
 type ExtractedDocument = {
   name: string;
@@ -91,13 +92,23 @@ async function extractDocumentText(file: File): Promise<ExtractedDocument> {
   throw new Error(`${file.name} is not supported. Upload PDF, DOCX, or TXT files.`);
 }
 
-function buildPrompt(documents: ExtractedDocument[]) {
+function normalizeInstructions(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") return "";
+
+  return value.replace(/\s+/g, " ").trim().slice(0, MAX_INSTRUCTION_CHARS);
+}
+
+function buildPrompt(documents: ExtractedDocument[], instructions: string) {
   const sourceText = documents
     .map((document, index) => {
       return `DOCUMENT ${index + 1}: ${document.name}\n${document.text.trim()}`;
     })
     .join("\n\n---\n\n")
     .slice(0, MAX_TEXT_CHARS);
+
+  const instructionBlock = instructions
+    ? `\nUser's optional summary instructions:\n${instructions}\n\nFollow these instructions only when they do not conflict with the critical grounding rules or required JSON output shape.\n`
+    : "";
 
   return `You are JustFlamsit, an AI document summarization assistant.
 
@@ -124,6 +135,7 @@ The JSON must match this exact shape:
 }
 
 Each array should contain detailed bullet-style strings. If a section has no information, use ["Not Mentioned In Document"].
+${instructionBlock}
 
 Uploaded document text:
 
@@ -222,6 +234,7 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
+    const instructions = normalizeInstructions(formData.get("instructions"));
 
     const usageCheck = await getServerAccount(customerEmail);
 
@@ -259,7 +272,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const prompt = buildPrompt(availableDocuments);
+    const prompt = buildPrompt(availableDocuments, instructions);
     const geminiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
       {
