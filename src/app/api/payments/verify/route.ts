@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAuthUserFromRequest } from "@/lib/auth";
+import { accountIdentityFromClerk, type ClerkIdentity, requireVerifiedClerkIdentity } from "@/lib/clerkIdentity";
 import { CASHFREE_PLAN, getCashfreeBaseUrl, getCashfreeHeaders } from "@/lib/cashfree";
 import { activateServerPro, normalizeEmail } from "@/lib/serverUsage";
 import { clientIp, rateLimit, readJsonWithLimit, requireSameOrigin } from "@/lib/security";
@@ -35,7 +35,7 @@ function isValidOrderId(orderId: string) {
   return /^JFS_[a-zA-Z0-9_]+$/.test(orderId);
 }
 
-async function verifyOrder(orderId: string, signedInEmail: string) {
+async function verifyOrder(orderId: string, signedInIdentity: ClerkIdentity) {
   const orderResponse = await fetch(`${getCashfreeBaseUrl()}/orders/${orderId}`, {
     method: "GET",
     headers: getCashfreeHeaders(),
@@ -72,13 +72,13 @@ async function verifyOrder(orderId: string, signedInEmail: string) {
     paymentCurrencyMatches;
   const customerEmail = normalizeEmail(order.customer_details?.customer_email);
 
-  if (!customerEmail || customerEmail !== signedInEmail) {
+  if (!customerEmail || customerEmail !== signedInIdentity.email) {
     throw new Error("This payment does not match your signed-in account.");
   }
 
   const activation =
     paid
-      ? await activateServerPro(customerEmail, orderId, paidPayment?.cf_payment_id)
+      ? await activateServerPro(accountIdentityFromClerk(signedInIdentity), orderId, paidPayment?.cf_payment_id)
       : null;
 
   return {
@@ -101,8 +101,8 @@ export async function POST(request: Request) {
     const originError = requireSameOrigin(request);
     if (originError) return originError;
 
-    const verifiedUser = getAuthUserFromRequest(request);
-    const signedInEmail = normalizeEmail(verifiedUser?.email);
+    const clerk = await requireVerifiedClerkIdentity();
+    const signedInEmail = clerk.identity?.email || "";
     const rateLimitError = rateLimit({
       key: `payment-verify:${signedInEmail || clientIp(request)}`,
       limit: 12,
@@ -117,11 +117,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A valid JustFlamsit order ID is required." }, { status: 400 });
     }
 
-    if (!signedInEmail) {
-      return NextResponse.json({ error: "Please sign in to verify this payment." }, { status: 401 });
+    if (!clerk.identity) {
+      return NextResponse.json({ error: clerk.error }, { status: clerk.status });
     }
 
-    const result = await verifyOrder(orderId, signedInEmail);
+    const result = await verifyOrder(orderId, clerk.identity);
     const response = NextResponse.json(result);
 
     if (result.paid) {
