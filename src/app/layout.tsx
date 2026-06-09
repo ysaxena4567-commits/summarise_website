@@ -52,6 +52,62 @@ export const metadata: Metadata = {
   },
 };
 
+const legacyAuthRedirectScript = `
+(() => {
+  if (location.pathname === "/sign-in" || location.pathname === "/sign-up") return;
+
+  const legacyAuthText = [
+    "create your free justflamsit account",
+    "continue with email",
+    "your usage and pro plan are synced to this email"
+  ];
+
+  const pageHasLegacyAuthModal = () => {
+    const text = document.body?.innerText?.replace(/\s+/g, " ").toLowerCase() || "";
+    return legacyAuthText.some((item) => text.includes(item));
+  };
+
+  const redirectLegacyModal = () => {
+    if (pageHasLegacyAuthModal()) {
+      location.assign("/sign-up");
+    }
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", redirectLegacyModal, { once: true });
+  } else {
+    redirectLegacyModal();
+  }
+
+  new MutationObserver(redirectLegacyModal).observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("button,a,label") : null;
+    const text = target?.textContent?.replace(/\s+/g, " ").trim().toLowerCase() || "";
+
+    const wantsSignUp =
+      text === "sign up" ||
+      text === "start summarizing free" ||
+      text.includes("create your free justflamsit account");
+
+    const wantsSignIn =
+      text === "log in" ||
+      text === "continue with email" ||
+      text === "continue with google" ||
+      text.includes("google");
+
+    if (wantsSignUp || wantsSignIn) {
+      event.preventDefault();
+      event.stopPropagation();
+      location.assign(wantsSignUp ? "/sign-up" : "/sign-in");
+    }
+  }, true);
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -88,6 +144,7 @@ export default function RootLayout({
             type="application/ld+json"
             dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
           />
+          <script dangerouslySetInnerHTML={{ __html: legacyAuthRedirectScript }} />
           <ClerkSessionBridge />
           {children}
           <Analytics />
