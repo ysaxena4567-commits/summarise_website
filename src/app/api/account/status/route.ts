@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { requireVerifiedClerkIdentity } from "@/lib/clerkIdentity";
-import { getServerAccount, normalizeEmail, remainingSummaries } from "@/lib/serverUsage";
+import { accountIdentityFromClerk, requireVerifiedClerkIdentity } from "@/lib/clerkIdentity";
+import { getServerAccount, remainingSummaries } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
@@ -12,8 +12,8 @@ export async function POST() {
       return NextResponse.json({ error: verified.error }, { status: verified.status });
     }
 
-    const email = normalizeEmail(verified.identity.email);
-    const { account, databaseBacked } = await getServerAccount(email);
+    const accountIdentity = accountIdentityFromClerk(verified.identity);
+    const { account, databaseBacked } = await getServerAccount(accountIdentity);
 
     return NextResponse.json({
       account: {
