@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Finlandica } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
@@ -76,19 +77,21 @@ export default function RootLayout({
   };
 
   return (
-    <html
-      lang="en"
-      className={`${finlandica.variable} h-full scroll-smooth antialiased`}
-    >
-      <body className="min-h-full flex flex-col">
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
-        />
-        {children}
-        <Analytics />
-        <SpeedInsights />
-      </body>
-    </html>
+    <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">
+      <html
+        lang="en"
+        className={`${finlandica.variable} h-full scroll-smooth antialiased`}
+      >
+        <body className="min-h-full flex flex-col">
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+          />
+          {children}
+          <Analytics />
+          <SpeedInsights />
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
