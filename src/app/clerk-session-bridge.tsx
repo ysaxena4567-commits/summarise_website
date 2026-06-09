@@ -21,6 +21,14 @@ function shouldUseClerk(text: string) {
   );
 }
 
+function shouldOpenSignUp(text: string) {
+  return (
+    text === "sign up" ||
+    text === "start summarizing free" ||
+    text.includes("create your free justflamsit account")
+  );
+}
+
 function legacyAuthModalVisible() {
   return Boolean(
     Array.from(document.querySelectorAll("h1,h2,p,button,label")).some((node) => {
@@ -65,7 +73,7 @@ export function ClerkSessionBridge() {
 
     const redirectLegacyModal = () => {
       if (legacyAuthModalVisible()) {
-        window.location.assign("/sign-in");
+        window.location.assign("/sign-up");
       }
     };
 
@@ -83,7 +91,7 @@ export function ClerkSessionBridge() {
       if (!isSignedIn && shouldUseClerk(text)) {
         event.preventDefault();
         event.stopPropagation();
-        window.location.assign(text === "sign up" ? "/sign-up" : "/sign-in");
+        window.location.assign(shouldOpenSignUp(text) ? "/sign-up" : "/sign-in");
         return;
       }
 
