@@ -21,12 +21,12 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
-  UserRound,
   X,
   Zap,
 } from "lucide-react";
 import { SignedIn, SignedOut, SignInButton, UserButton, useUser } from "@clerk/nextjs";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   FREE_SUMMARY_LIMIT,
   canGenerateSummary,
@@ -115,7 +115,7 @@ function Logo() {
   );
 }
 
-function PrimaryLink({ href, children }: { href: string; children: React.ReactNode }) {
+function PrimaryLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <a
       href={href}
@@ -144,7 +144,7 @@ function Header({ authUser }: { authUser: AuthUser | null }) {
         <div className="hidden md:block">
           <SignedIn>
             <div className="inline-flex min-h-11 items-center gap-3 rounded-lg border border-white/10 px-3 text-sm font-semibold text-zinc-200">
-              <UserButton afterSignOutUrl="/" />
+              <UserButton />
               <span>{authUser?.email.split("@")[0] || "Account"}</span>
             </div>
           </SignedIn>
@@ -176,7 +176,7 @@ function Header({ authUser }: { authUser: AuthUser | null }) {
             ))}
             <SignedIn>
               <div className="inline-flex min-h-12 items-center justify-center gap-3 rounded-lg border border-white/10 px-4 text-sm font-semibold text-white">
-                <UserButton afterSignOutUrl="/" />
+                <UserButton />
                 {authUser?.email.split("@")[0] || "Account"}
               </div>
             </SignedIn>
@@ -371,6 +371,9 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
 
       if (!response.ok || !data.summary) {
         if (response.status === 401) requireClerkSignIn();
+        if (response.status === 402 || data.upgradeRequired) {
+          throw new Error(data.error || "Your current summary limit is finished. Upgrade to continue.");
+        }
         throw new Error(data.error || "The document could not be summarized.");
       }
 
