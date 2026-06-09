@@ -3,6 +3,7 @@ import { Finlandica } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { ClerkSessionBridge } from "./clerk-session-bridge";
 import "./globals.css";
 
 const finlandica = Finlandica({
@@ -87,6 +88,7 @@ export default function RootLayout({
             type="application/ld+json"
             dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
           />
+          <ClerkSessionBridge />
           {children}
           <Analytics />
           <SpeedInsights />
