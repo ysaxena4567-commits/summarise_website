@@ -12,8 +12,11 @@ function buttonText(target: EventTarget | null) {
 function shouldUseClerk(text: string) {
   return (
     text === "log in" ||
+    text === "sign up" ||
     text === "continue with email" ||
+    text === "continue with google" ||
     text === "start summarizing free" ||
+    text.includes("google") ||
     text.includes("create your free justflamsit account")
   );
 }
@@ -80,7 +83,7 @@ export function ClerkSessionBridge() {
       if (!isSignedIn && shouldUseClerk(text)) {
         event.preventDefault();
         event.stopPropagation();
-        window.location.assign("/sign-in");
+        window.location.assign(text === "sign up" ? "/sign-up" : "/sign-in");
         return;
       }
 
