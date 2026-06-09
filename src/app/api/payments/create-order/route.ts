@@ -5,8 +5,7 @@ import {
   getCashfreeEnv,
   getCashfreeHeaders,
 } from "@/lib/cashfree";
-import { getAuthUserFromRequest } from "@/lib/auth";
-import { normalizeEmail } from "@/lib/serverUsage";
+import { requireVerifiedClerkIdentity } from "@/lib/clerkIdentity";
 import { clientIp, rateLimit, readJsonWithLimit, requireSameOrigin } from "@/lib/security";
 
 export const runtime = "nodejs";
@@ -56,8 +55,8 @@ export async function POST(request: Request) {
     const originError = requireSameOrigin(request);
     if (originError) return originError;
 
-    const verifiedUser = getAuthUserFromRequest(request);
-    const customerEmail = normalizeEmail(verifiedUser?.email);
+    const clerk = await requireVerifiedClerkIdentity();
+    const customerEmail = clerk.identity?.email || "";
     const rateLimitError = rateLimit({
       key: `payment-create:${customerEmail || clientIp(request)}`,
       limit: 6,
@@ -67,11 +66,8 @@ export async function POST(request: Request) {
 
     const body = await readJsonWithLimit<CreateOrderBody>(request, 4_096);
 
-    if (!customerEmail) {
-      return NextResponse.json(
-        { error: "Please sign in before starting Cashfree checkout." },
-        { status: 401 },
-      );
+    if (!clerk.identity) {
+      return NextResponse.json({ error: clerk.error }, { status: clerk.status });
     }
 
     const orderId = `JFS_${Date.now()}_${crypto.randomUUID().replace(/-/g, "").slice(0, 10)}`;
@@ -97,6 +93,7 @@ export async function POST(request: Request) {
         order_tags: {
           plan_id: CASHFREE_PLAN.id,
           product: "JustFlamsit",
+          clerk_user_id: clerk.identity.userId,
         },
       }),
     });
