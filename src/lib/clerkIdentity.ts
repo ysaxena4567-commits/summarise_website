@@ -8,6 +8,27 @@ export type ClerkIdentity = {
   name?: string;
 };
 
+export type AccountIdentity = {
+  key: string;
+  email: string;
+  userId?: string;
+};
+
+export function anonymousIdentity(key: string): AccountIdentity {
+  return {
+    key: `anonymous:${key}`,
+    email: "",
+  };
+}
+
+export function accountIdentityFromClerk(identity: ClerkIdentity): AccountIdentity {
+  return {
+    key: `clerk:${identity.userId}`,
+    email: identity.email,
+    userId: identity.userId,
+  };
+}
+
 export async function getClerkIdentity(): Promise<ClerkIdentity | null> {
   const { userId } = await auth();
 
