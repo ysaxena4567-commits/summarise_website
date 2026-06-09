@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
 import PDFParser from "pdf2json";
-import { getAuthUserFromRequest } from "@/lib/auth";
+import { accountIdentityFromClerk, anonymousIdentity, getClerkIdentity } from "@/lib/clerkIdentity";
 import {
   consumeServerSummary,
   getServerAccount,
-  normalizeEmail,
+  recordSummaryMetadata,
   refundServerSummary,
   remainingSummaries,
 } from "@/lib/serverUsage";
@@ -225,21 +225,18 @@ export async function POST(request: Request) {
     const originError = requireSameOrigin(request);
     if (originError) return originError;
 
-    const verifiedUser = getAuthUserFromRequest(request);
-    const customerEmail = normalizeEmail(verifiedUser?.email);
+    const clerkIdentity = await getClerkIdentity();
+    const signedInIdentity =
+      clerkIdentity?.email && clerkIdentity.emailVerified
+        ? accountIdentityFromClerk(clerkIdentity)
+        : null;
+    const usageIdentity = signedInIdentity || anonymousIdentity(clientIp(request));
     const rateLimitError = rateLimit({
-      key: `summarize:${customerEmail || clientIp(request)}`,
+      key: `summarize:${usageIdentity.key}`,
       limit: 12,
       windowMs: 10 * 60 * 1000,
     });
     if (rateLimitError) return rateLimitError;
-
-    if (!customerEmail) {
-      return NextResponse.json(
-        { error: "Please sign in before generating summaries." },
-        { status: 401 },
-      );
-    }
 
     const apiKey = process.env.GEMINI_API_KEY;
 
@@ -259,7 +256,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const instructions = normalizeInstructions(formData.get("instructions"));
 
-    const usageCheck = await getServerAccount(customerEmail);
+    const usageCheck = await getServerAccount(usageIdentity);
 
     if (usageCheck.databaseBacked && remainingSummaries(usageCheck.account) <= 0) {
       return NextResponse.json(
@@ -295,7 +292,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const usage = await consumeServerSummary(customerEmail);
+    const usage = await consumeServerSummary(usageIdentity);
 
     if (!usage.allowed) {
       return NextResponse.json(
@@ -349,8 +346,17 @@ export async function POST(request: Request) {
 
       summary = extractGeminiText(data);
     } catch (error) {
-      await refundServerSummary(customerEmail);
+      await refundServerSummary(usageIdentity);
       throw error;
+    }
+
+    if (signedInIdentity) {
+      await recordSummaryMetadata(signedInIdentity, {
+        documentNames: availableDocuments.map((document) => document.name),
+        documentCount: availableDocuments.length,
+        totalCharacters: availableDocuments.reduce((total, document) => total + document.text.length, 0),
+        instructionLength: instructions.length,
+      });
     }
 
     return NextResponse.json({
