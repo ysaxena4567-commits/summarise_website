@@ -24,7 +24,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { SignedIn, SignedOut, SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -142,20 +142,19 @@ function Header({ authUser }: { authUser: AuthUser | null }) {
           ))}
         </div>
         <div className="hidden md:block">
-          <SignedIn>
+          {authUser ? (
             <div className="inline-flex min-h-11 items-center gap-3 rounded-lg border border-white/10 px-3 text-sm font-semibold text-zinc-200">
               <UserButton />
-              <span>{authUser?.email.split("@")[0] || "Account"}</span>
+              <span>{authUser.email.split("@")[0]}</span>
             </div>
-          </SignedIn>
-          <SignedOut>
+          ) : (
             <SignInButton mode="redirect">
               <button type="button" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-4 text-sm font-semibold text-[#28282b] transition hover:bg-[#dbc966]">
                 <LogIn size={17} />
                 Sign in
               </button>
             </SignInButton>
-          </SignedOut>
+          )}
         </div>
         <button
           type="button"
@@ -174,20 +173,19 @@ function Header({ authUser }: { authUser: AuthUser | null }) {
                 {item.label}
               </a>
             ))}
-            <SignedIn>
+            {authUser ? (
               <div className="inline-flex min-h-12 items-center justify-center gap-3 rounded-lg border border-white/10 px-4 text-sm font-semibold text-white">
                 <UserButton />
-                {authUser?.email.split("@")[0] || "Account"}
+                {authUser.email.split("@")[0]}
               </div>
-            </SignedIn>
-            <SignedOut>
+            ) : (
               <SignInButton mode="redirect">
                 <button type="button" onClick={() => setMobileOpen(false)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-4 text-sm font-semibold text-[#28282b]">
                   <LogIn size={17} />
                   Sign in
                 </button>
               </SignInButton>
-            </SignedOut>
+            )}
           </div>
         </div>
       )}
@@ -714,12 +712,7 @@ export default function Home() {
             <h1 className="mt-7 max-w-4xl text-5xl font-semibold leading-[1.02] tracking-normal text-white sm:text-6xl lg:text-7xl">Turn 100-page documents into 1-minute insights</h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-200 sm:text-xl">Use AI to summarize reports, PDFs, assignments, contracts, research papers, and lengthy files into clear, actionable summaries.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <SignedOut>
-                <PrimaryLink href="/sign-up">Start free</PrimaryLink>
-              </SignedOut>
-              <SignedIn>
-                <PrimaryLink href="#summarizer">Open summarizer</PrimaryLink>
-              </SignedIn>
+              {authUser ? <PrimaryLink href="#summarizer">Open summarizer</PrimaryLink> : <PrimaryLink href="/sign-up">Start free</PrimaryLink>}
               <a href="#how-it-works" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/15 px-5 text-sm font-semibold text-white transition hover:border-[#c5b358]/70 hover:bg-white/5">
                 <Play size={16} fill="currentColor" />
                 See how it works
@@ -814,12 +807,7 @@ export default function Home() {
           <h2 className="mt-4 text-4xl font-semibold text-white sm:text-5xl">Stop reading hundreds of pages. Start getting answers.</h2>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-200">Join students, professionals, and researchers using Clerk-secured JustFlamsit accounts.</p>
           <div className="mt-8 flex justify-center">
-            <SignedOut>
-              <PrimaryLink href="/sign-up">Get started</PrimaryLink>
-            </SignedOut>
-            <SignedIn>
-              <PrimaryLink href="#summarizer">Open summarizer</PrimaryLink>
-            </SignedIn>
+            {authUser ? <PrimaryLink href="#summarizer">Open summarizer</PrimaryLink> : <PrimaryLink href="/sign-up">Get started</PrimaryLink>}
           </div>
         </div>
       </section>
