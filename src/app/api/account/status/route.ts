@@ -1,22 +1,32 @@
 import { NextResponse } from "next/server";
-import { getAuthUserFromRequest } from "@/lib/auth";
+import { requireVerifiedClerkIdentity } from "@/lib/clerkIdentity";
 import { getServerAccount, normalizeEmail, remainingSummaries } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
-export async function POST(request: Request) {
+export async function POST() {
   try {
-    const verifiedUser = getAuthUserFromRequest(request);
-    const email = normalizeEmail(verifiedUser?.email);
+    const verified = await requireVerifiedClerkIdentity();
 
-    if (!email) {
-      return NextResponse.json({ error: "Please sign in to sync account usage." }, { status: 401 });
+    if (!verified.identity) {
+      return NextResponse.json({ error: verified.error }, { status: verified.status });
     }
 
+    const email = normalizeEmail(verified.identity.email);
     const { account, databaseBacked } = await getServerAccount(email);
 
     return NextResponse.json({
-      account,
+      account: {
+        ...account,
+        userId: verified.identity.userId,
+        email: verified.identity.email,
+        emailVerified: verified.identity.emailVerified,
+      },
+      identity: {
+        userId: verified.identity.userId,
+        email: verified.identity.email,
+        emailVerified: verified.identity.emailVerified,
+      },
       remaining: remainingSummaries(account),
       databaseBacked,
     });
