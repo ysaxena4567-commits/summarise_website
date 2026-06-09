@@ -6,14 +6,38 @@ import {
   PRO_MONTHLY_SUMMARY_LIMIT,
   type UsageState,
 } from "@/lib/usage";
+import type { AccountIdentity } from "@/lib/clerkIdentity";
 
 type AccountRecord = UsageState & {
+  identityKey: string;
   email: string;
+  userId?: string;
   updatedAt: string;
   proActivatedAt?: string;
   proExpiresAt?: string;
   lastPaymentOrderId?: string;
   lastPaymentId?: string | null;
+  paymentStatus?: "none" | "paid";
+  subscriptionStatus?: "none" | "active" | "expired";
+  summaryHistory?: SummaryMetadata[];
+  feedback?: FeedbackMetadata[];
+};
+
+export type SummaryMetadata = {
+  id: string;
+  createdAt: string;
+  documentNames: string[];
+  documentCount: number;
+  totalCharacters: number;
+  instructionLength: number;
+};
+
+export type FeedbackMetadata = {
+  id: string;
+  createdAt: string;
+  rating?: number;
+  messageLength: number;
+  context?: string;
 };
 
 type ConsumeResult = {
@@ -51,20 +75,36 @@ export function normalizeEmail(email?: string | null) {
   return email?.trim().toLowerCase() || "";
 }
 
-function accountKey(email: string) {
-  return `justflamsit:account:${email}`;
+function normalizeIdentity(identity: string | AccountIdentity): AccountIdentity {
+  if (typeof identity === "string") {
+    const email = normalizeEmail(identity);
+    return {
+      key: email,
+      email,
+    };
+  }
+
+  return {
+    key: identity.key.trim(),
+    email: normalizeEmail(identity.email),
+    userId: identity.userId,
+  };
 }
 
-function accountBlobPath(email: string) {
-  return `accounts/${Buffer.from(email).toString("base64url")}.json`;
+function accountKey(identityKey: string) {
+  return `justflamsit:account:${identityKey}`;
 }
 
-function accountLockKey(email: string) {
-  return `justflamsit:account-lock:${email}`;
+function accountBlobPath(identityKey: string) {
+  return `accounts/${Buffer.from(identityKey).toString("base64url")}.json`;
 }
 
-function accountLockBlobPath(email: string) {
-  return `accounts/locks/${Buffer.from(email).toString("base64url")}.lock`;
+function accountLockKey(identityKey: string) {
+  return `justflamsit:account-lock:${identityKey}`;
+}
+
+function accountLockBlobPath(identityKey: string) {
+  return `accounts/locks/${Buffer.from(identityKey).toString("base64url")}.lock`;
 }
 
 function legacyAccountBlobPaths(email: string) {
@@ -96,18 +136,24 @@ export function isDatabaseConfigured() {
   return Boolean(getAccountStore());
 }
 
-function freshAccount(email: string): AccountRecord {
+function freshAccount(identity: AccountIdentity): AccountRecord {
   return {
-    email,
+    identityKey: identity.key,
+    email: identity.email,
+    userId: identity.userId,
     plan: "free",
     freeUsed: 0,
     proUsed: 0,
     monthKey: monthKey(),
+    paymentStatus: "none",
+    subscriptionStatus: "none",
+    summaryHistory: [],
+    feedback: [],
     updatedAt: new Date().toISOString(),
   };
 }
 
-function normalizeAccount(email: string, account?: Partial<AccountRecord> | null): AccountRecord {
+function normalizeAccount(identity: AccountIdentity, account?: Partial<AccountRecord> | null): AccountRecord {
   const currentMonth = monthKey();
   const rawPlan = account?.plan === "pro" ? "pro" : "free";
   const fallbackExpiresAt =
@@ -118,9 +164,11 @@ function normalizeAccount(email: string, account?: Partial<AccountRecord> | null
   const proExpired = rawPlan === "pro" && isExpired(proExpiresAt);
   const plan: UsageState["plan"] = rawPlan === "pro" && !proExpired ? "pro" : "free";
   const normalized: AccountRecord = {
-    ...freshAccount(email),
+    ...freshAccount(identity),
     ...account,
-    email,
+    identityKey: identity.key,
+    email: identity.email || normalizeEmail(account?.email),
+    userId: identity.userId || account?.userId,
     plan,
     freeUsed: proExpired
       ? FREE_SUMMARY_LIMIT
@@ -128,6 +176,10 @@ function normalizeAccount(email: string, account?: Partial<AccountRecord> | null
     proUsed: plan === "pro" ? Math.max(Number(account?.proUsed ?? 0), 0) : 0,
     monthKey: account?.monthKey || currentMonth,
     proExpiresAt: plan === "pro" ? proExpiresAt : undefined,
+    paymentStatus: plan === "pro" ? "paid" : account?.paymentStatus || "none",
+    subscriptionStatus: plan === "pro" ? "active" : proExpired ? "expired" : "none",
+    summaryHistory: account?.summaryHistory?.slice(-25) || [],
+    feedback: account?.feedback?.slice(-25) || [],
     updatedAt: new Date().toISOString(),
   };
 
@@ -147,16 +199,16 @@ export function remainingSummaries(account: UsageState) {
   return Math.max(FREE_SUMMARY_LIMIT - account.freeUsed, 0);
 }
 
-async function readAccount(email: string) {
+async function readAccount(identityKey: string) {
   const store = getAccountStore();
 
   if (!store) return null;
 
   if (store.kind === "redis") {
-    return store.client.get<AccountRecord>(accountKey(email));
+    return store.client.get<AccountRecord>(accountKey(identityKey));
   }
 
-  const paths = [accountBlobPath(email), ...legacyAccountBlobPaths(email)];
+  const paths = [accountBlobPath(identityKey), ...legacyAccountBlobPaths(identityKey)];
 
   for (const path of paths) {
     try {
@@ -179,11 +231,11 @@ async function writeAccount(account: AccountRecord) {
   if (!store) return;
 
   if (store.kind === "redis") {
-    await store.client.set(accountKey(account.email), account);
+    await store.client.set(accountKey(account.identityKey), account);
     return;
   }
 
-  await put(accountBlobPath(account.email), JSON.stringify(account), {
+  await put(accountBlobPath(account.identityKey), JSON.stringify(account), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
@@ -195,7 +247,7 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function acquireAccountLock(email: string, store: Exclude<AccountStore, null>) {
+async function acquireAccountLock(identityKey: string, store: Exclude<AccountStore, null>) {
   const lockValue = crypto.randomUUID();
   const lockExpiresAt = Date.now() + 15_000;
   const deadline = Date.now() + 10_000;
@@ -203,16 +255,16 @@ async function acquireAccountLock(email: string, store: Exclude<AccountStore, nu
   while (Date.now() < deadline) {
     try {
       if (store.kind === "redis") {
-        const acquired = await store.client.set(accountLockKey(email), lockValue, {
+        const acquired = await store.client.set(accountLockKey(identityKey), lockValue, {
           nx: true,
           ex: 15,
         });
 
         if (acquired) {
-          return { kind: "redis" as const, key: accountLockKey(email), value: lockValue, client: store.client };
+          return { kind: "redis" as const, key: accountLockKey(identityKey), value: lockValue, client: store.client };
         }
       } else {
-        const path = accountLockBlobPath(email);
+        const path = accountLockBlobPath(identityKey);
         await put(path, JSON.stringify({ value: lockValue, expiresAt: lockExpiresAt }), {
           access: "private",
           addRandomSuffix: false,
@@ -222,10 +274,9 @@ async function acquireAccountLock(email: string, store: Exclude<AccountStore, nu
         return { kind: "blob" as const, path, value: lockValue };
       }
     } catch {
-      // Another request owns the lock. Retry briefly so concurrent payments/summaries serialize per account.
       if (store.kind === "blob") {
         try {
-          const path = accountLockBlobPath(email);
+          const path = accountLockBlobPath(identityKey);
           const blob = await get(path, { access: "private", useCache: false });
           const text = blob?.statusCode === 200 ? await new Response(blob.stream).text() : "";
           const lock = JSON.parse(text) as { expiresAt?: number };
@@ -267,12 +318,12 @@ async function releaseAccountLock(lock: Awaited<ReturnType<typeof acquireAccount
   }
 }
 
-async function withAccountLock<T>(email: string, task: () => Promise<T>) {
+async function withAccountLock<T>(identityKey: string, task: () => Promise<T>) {
   const store = getAccountStore();
 
   if (!store) return task();
 
-  const lock = await acquireAccountLock(email, store);
+  const lock = await acquireAccountLock(identityKey, store);
 
   try {
     return await task();
@@ -281,32 +332,32 @@ async function withAccountLock<T>(email: string, task: () => Promise<T>) {
   }
 }
 
-export async function getServerAccount(email: string) {
-  const normalizedEmail = normalizeEmail(email);
+export async function getServerAccount(identityInput: string | AccountIdentity) {
+  const identity = normalizeIdentity(identityInput);
   const store = getAccountStore();
 
-  if (!normalizedEmail || !store) {
-    return { account: freshAccount(normalizedEmail), databaseBacked: false };
+  if (!identity.key || !store) {
+    return { account: freshAccount(identity), databaseBacked: false };
   }
 
-  const stored = await readAccount(normalizedEmail);
-  const account = normalizeAccount(normalizedEmail, stored);
+  const stored = await readAccount(identity.key);
+  const account = normalizeAccount(identity, stored);
   await writeAccount(account);
 
   return { account, databaseBacked: true };
 }
 
-export async function consumeServerSummary(email: string): Promise<ConsumeResult> {
-  const normalizedEmail = normalizeEmail(email);
+export async function consumeServerSummary(identityInput: string | AccountIdentity): Promise<ConsumeResult> {
+  const identity = normalizeIdentity(identityInput);
   const store = getAccountStore();
 
-  if (!normalizedEmail || !store) {
-    return { allowed: true, account: freshAccount(normalizedEmail), databaseBacked: false };
+  if (!identity.key || !store) {
+    return { allowed: true, account: freshAccount(identity), databaseBacked: false };
   }
 
-  return withAccountLock(normalizedEmail, async () => {
-    const stored = await readAccount(normalizedEmail);
-    const account = normalizeAccount(normalizedEmail, stored);
+  return withAccountLock(identity.key, async () => {
+    const stored = await readAccount(identity.key);
+    const account = normalizeAccount(identity, stored);
 
     if (remainingSummaries(account) <= 0) {
       await writeAccount(account);
@@ -325,17 +376,17 @@ export async function consumeServerSummary(email: string): Promise<ConsumeResult
   });
 }
 
-export async function refundServerSummary(email: string): Promise<AccountMutationResult> {
-  const normalizedEmail = normalizeEmail(email);
+export async function refundServerSummary(identityInput: string | AccountIdentity): Promise<AccountMutationResult> {
+  const identity = normalizeIdentity(identityInput);
   const store = getAccountStore();
 
-  if (!normalizedEmail || !store) {
-    return { account: freshAccount(normalizedEmail), databaseBacked: false };
+  if (!identity.key || !store) {
+    return { account: freshAccount(identity), databaseBacked: false };
   }
 
-  return withAccountLock(normalizedEmail, async () => {
-    const stored = await readAccount(normalizedEmail);
-    const account = normalizeAccount(normalizedEmail, stored);
+  return withAccountLock(identity.key, async () => {
+    const stored = await readAccount(identity.key);
+    const account = normalizeAccount(identity, stored);
     const nextAccount: AccountRecord = {
       ...account,
       freeUsed: account.plan === "free" ? Math.max(account.freeUsed - 1, 0) : account.freeUsed,
@@ -348,17 +399,17 @@ export async function refundServerSummary(email: string): Promise<AccountMutatio
   });
 }
 
-export async function activateServerPro(email: string, orderId: string, paymentId?: string | null) {
-  const normalizedEmail = normalizeEmail(email);
+export async function activateServerPro(identityInput: string | AccountIdentity, orderId: string, paymentId?: string | null) {
+  const identity = normalizeIdentity(identityInput);
   const store = getAccountStore();
 
-  if (!normalizedEmail || !store) {
-    return { account: freshAccount(normalizedEmail), databaseBacked: false };
+  if (!identity.key || !store) {
+    return { account: freshAccount(identity), databaseBacked: false };
   }
 
-  return withAccountLock(normalizedEmail, async () => {
-    const stored = await readAccount(normalizedEmail);
-    const account = normalizeAccount(normalizedEmail, stored);
+  return withAccountLock(identity.key, async () => {
+    const stored = await readAccount(identity.key);
+    const account = normalizeAccount(identity, stored);
     const activatedAt = new Date();
 
     if (account.plan === "pro" && account.lastPaymentOrderId === orderId) {
@@ -374,6 +425,66 @@ export async function activateServerPro(email: string, orderId: string, paymentI
       proExpiresAt: addThirtyDays(activatedAt).toISOString(),
       lastPaymentOrderId: orderId,
       lastPaymentId: paymentId,
+      paymentStatus: "paid",
+      subscriptionStatus: "active",
+      updatedAt: new Date().toISOString(),
+    };
+
+    await writeAccount(nextAccount);
+    return { account: nextAccount, databaseBacked: true };
+  });
+}
+
+export async function recordSummaryMetadata(identityInput: AccountIdentity, metadata: Omit<SummaryMetadata, "id" | "createdAt">) {
+  const identity = normalizeIdentity(identityInput);
+  const store = getAccountStore();
+
+  if (!identity.key || !identity.email || !store) {
+    return { account: freshAccount(identity), databaseBacked: false };
+  }
+
+  return withAccountLock(identity.key, async () => {
+    const stored = await readAccount(identity.key);
+    const account = normalizeAccount(identity, stored);
+    const nextAccount: AccountRecord = {
+      ...account,
+      summaryHistory: [
+        ...(account.summaryHistory || []),
+        {
+          id: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          ...metadata,
+        },
+      ].slice(-25),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await writeAccount(nextAccount);
+    return { account: nextAccount, databaseBacked: true };
+  });
+}
+
+export async function recordFeedbackMetadata(identityInput: AccountIdentity, metadata: Omit<FeedbackMetadata, "id" | "createdAt">) {
+  const identity = normalizeIdentity(identityInput);
+  const store = getAccountStore();
+
+  if (!identity.key || !identity.email || !store) {
+    return { account: freshAccount(identity), databaseBacked: false };
+  }
+
+  return withAccountLock(identity.key, async () => {
+    const stored = await readAccount(identity.key);
+    const account = normalizeAccount(identity, stored);
+    const nextAccount: AccountRecord = {
+      ...account,
+      feedback: [
+        ...(account.feedback || []),
+        {
+          id: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          ...metadata,
+        },
+      ].slice(-25),
       updatedAt: new Date().toISOString(),
     };
 
