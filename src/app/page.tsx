@@ -167,12 +167,15 @@ function isDocxFile(file: File) {
 
 async function extractPdfTextInBrowser(file: File) {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/legacy/build/pdf.worker.mjs",
+    import.meta.url,
+  ).toString();
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(arrayBuffer),
-    disableWorker: true,
     useSystemFonts: true,
-  } as Record<string, unknown>).promise;
+  }).promise;
   const pageTexts: string[] = [];
   const diagramTableSignals: string[] = [];
 
