@@ -1,5 +1,6 @@
 import { SignIn } from "@clerk/nextjs";
 import { BookOpenText, FileText, ShieldCheck, Sparkles } from "lucide-react";
+import Link from "next/link";
 
 const clerkAppearance = {
   variables: {
@@ -48,12 +49,12 @@ export default function SignInPage() {
     <main className="relative min-h-screen overflow-hidden bg-[#28282b] px-4 py-8 text-white sm:px-6 lg:px-8">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(197,179,88,0.22),transparent_32%),radial-gradient(circle_at_20%_80%,rgba(255,255,255,0.06),transparent_30%)]" />
       <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl flex-col items-center justify-center gap-7">
-        <a href="/" className="flex items-center gap-3" aria-label="JustFlamsit home">
+        <Link href="/" className="flex items-center gap-3" aria-label="JustFlamsit home">
           <span className="grid size-12 place-items-center rounded-lg border border-[#c5b358]/45 bg-[#c5b358] text-[#28282b] shadow-[0_0_40px_rgba(197,179,88,0.34)]">
             <Sparkles size={22} strokeWidth={2.5} />
           </span>
           <span className="text-2xl font-semibold text-white sm:text-3xl">JustFlamsit</span>
-        </a>
+        </Link>
 
         <section className="w-full max-w-[31rem] rounded-2xl border border-[#c5b358]/35 bg-[#101012]/92 p-5 shadow-[0_30px_90px_rgba(0,0,0,0.48)] backdrop-blur sm:p-7">
           <div className="text-center">

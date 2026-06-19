@@ -93,6 +93,38 @@ type ExtractedUploadDocument = {
   text: string;
 };
 
+type PdfTextItem = {
+  str?: string;
+};
+
+type PdfDocumentProxy = {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<{
+    getTextContent: () => Promise<{ items: PdfTextItem[] }>;
+  }>;
+  destroy?: () => Promise<void> | void;
+};
+
+type PdfJsBrowser = {
+  GlobalWorkerOptions: {
+    workerSrc: string;
+  };
+  getDocument: (params: {
+    data: Uint8Array;
+    useSystemFonts: boolean;
+    disableFontFace: boolean;
+  }) => {
+    promise: Promise<PdfDocumentProxy>;
+  };
+};
+
+declare global {
+  interface Window {
+    pdfjsLib?: PdfJsBrowser;
+    justFlamsitPdfJsPromise?: Promise<PdfJsBrowser>;
+  }
+}
+
 const MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
 const supportedUploadExtensions = new Set(["pdf", "docx", "txt"]);
 const supportedUploadMimeTypes = new Set([
@@ -127,29 +159,6 @@ function validateUploadFile(file: File) {
   return { accepted: true, reason: "" };
 }
 
-function safeTransportFileName(file: File) {
-  const rawName = file.name || "uploaded-document";
-  const extension = rawName.includes(".") ? rawName.split(".").pop()?.toLowerCase() || "" : "";
-  const fallbackExtension =
-    file.type.toLowerCase() === "application/pdf"
-      ? "pdf"
-      : file.type.toLowerCase() === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ? "docx"
-        : file.type.toLowerCase() === "text/plain"
-          ? "txt"
-          : "dat";
-  const finalExtension = supportedUploadExtensions.has(extension) ? extension : fallbackExtension;
-  const baseName = rawName
-    .replace(/\.[^.]+$/, "")
-    .normalize("NFKD")
-    .replace(/[^\w.-]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 80) || "uploaded-document";
-
-  return `${baseName}.${finalExtension}`;
-}
-
 function isPdfFile(file: File) {
   return file.type.toLowerCase() === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
@@ -165,55 +174,176 @@ function isDocxFile(file: File) {
   );
 }
 
-async function extractPdfTextInBrowser(file: File) {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/legacy/build/pdf.worker.mjs",
-    import.meta.url,
-  ).toString();
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjs.getDocument({
-    data: new Uint8Array(arrayBuffer),
-    useSystemFonts: true,
-  }).promise;
-  const pageTexts: string[] = [];
-  const diagramTableSignals: string[] = [];
+function loadBrowserScript(src: string) {
+  return new Promise<void>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
 
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const textItems = content.items
-      .map((item) => ("str" in item ? item.str : ""))
-      .filter(Boolean);
-    const pageText = textItems.join(" ").replace(/\s+/g, " ").trim();
-
-    if (pageText) {
-      pageTexts.push(`[Page ${pageNumber}] ${pageText}`);
+    if (existingScript?.dataset.loaded === "true") {
+      resolve();
+      return;
     }
 
-    const visualSignals = textItems
-      .filter((item) => /\b(fig(?:ure)?|diagram|table|chart|graph|flowchart|cycle|scheme)\b/i.test(item))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const script = existingScript || document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.dataset.justFlamsitRuntime = "true";
+    script.onload = () => {
+      script.dataset.loaded = "true";
+      resolve();
+    };
+    script.onerror = () => reject(new Error(`Could not load browser runtime script: ${src}`));
 
-    if (visualSignals) {
-      diagramTableSignals.push(`[Page ${pageNumber}] ${visualSignals}`);
+    if (!existingScript) {
+      document.head.appendChild(script);
     }
+  });
+}
+
+function installPdfRuntimePolyfills() {
+  const arrayPrototype = Array.prototype as Array<unknown> & {
+    at?: (index: number) => unknown;
+  };
+  const stringPrototype = String.prototype as unknown as {
+    replaceAll?: (searchValue: string | RegExp, replaceValue: string) => string;
+  };
+  const promiseConstructor = Promise as typeof Promise & {
+    withResolvers?: <T>() => {
+      promise: Promise<T>;
+      resolve: (value: T | PromiseLike<T>) => void;
+      reject: (reason?: unknown) => void;
+    };
+  };
+
+  if (!arrayPrototype.at) {
+    Object.defineProperty(arrayPrototype, "at", {
+      configurable: true,
+      writable: true,
+      value(index: number) {
+        const list = Object(this) as { length: number; [key: number]: unknown };
+        const length = Math.trunc(Number(list.length)) || 0;
+        const relativeIndex = Math.trunc(Number(index)) || 0;
+        const resolvedIndex = relativeIndex >= 0 ? relativeIndex : length + relativeIndex;
+        return resolvedIndex < 0 || resolvedIndex >= length ? undefined : list[resolvedIndex];
+      },
+    });
   }
 
-  const extractedText = pageTexts.join("\n\n").trim();
-  const visualNote = diagramTableSignals.length
-    ? `\n\n[Detected diagram/table/caption signals]\n${diagramTableSignals.join("\n")}`
-    : "";
-  const warning =
-    extractedText.length < 500
-      ? "\n\n[Extraction warning] This PDF appears to be image-heavy or scanned. Only selectable text and visible captions could be extracted. Do not invent diagram/table details that are not present in extracted text."
-      : "";
+  if (!stringPrototype.replaceAll) {
+    Object.defineProperty(stringPrototype, "replaceAll", {
+      configurable: true,
+      writable: true,
+      value(searchValue: string | RegExp, replaceValue: string) {
+        if (searchValue instanceof RegExp) {
+          if (!searchValue.global) {
+            throw new TypeError("String.prototype.replaceAll called with a non-global RegExp argument");
+          }
+          return String(this).replace(searchValue, replaceValue);
+        }
 
-  console.log(`Extracted PDF client-side "${file.name}" with ${extractedText.length} characters across ${pdf.numPages} pages.`);
-  await (pdf as unknown as { destroy?: () => Promise<void> | void }).destroy?.();
-  return `${extractedText}${visualNote}${warning}`.trim();
+        return String(this).split(String(searchValue)).join(replaceValue);
+      },
+    });
+  }
+
+  if (!promiseConstructor.withResolvers) {
+    Object.defineProperty(promiseConstructor, "withResolvers", {
+      configurable: true,
+      writable: true,
+      value<T>() {
+        let resolve!: (value: T | PromiseLike<T>) => void;
+        let reject!: (reason?: unknown) => void;
+        const promise = new Promise<T>((promiseResolve, promiseReject) => {
+          resolve = promiseResolve;
+          reject = promiseReject;
+        });
+
+        return { promise, resolve, reject };
+      },
+    });
+  }
+}
+
+async function loadPdfJsBrowser() {
+  if (typeof window === "undefined") {
+    throw new Error("PDF extraction can only run in the browser.");
+  }
+
+  if (!window.justFlamsitPdfJsPromise) {
+    installPdfRuntimePolyfills();
+    window.justFlamsitPdfJsPromise = loadBrowserScript("/pdf.min.js").then(() => {
+      if (!window.pdfjsLib) {
+        throw new Error("PDF.js loaded, but the browser runtime was not initialized.");
+      }
+
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
+      return window.pdfjsLib;
+    });
+  }
+
+  return window.justFlamsitPdfJsPromise;
+}
+
+async function extractPdfTextInBrowser(file: File) {
+  let pdf: PdfDocumentProxy | undefined;
+
+  try {
+    const pdfjs = await loadPdfJsBrowser();
+    const arrayBuffer = await file.arrayBuffer();
+    pdf = await pdfjs.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+      disableFontFace: true,
+    }).promise;
+    const pageTexts: string[] = [];
+    const diagramTableSignals: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const textItems = content.items
+        .map((item) => (typeof item.str === "string" ? item.str : ""))
+        .filter(Boolean);
+      const pageText = textItems.join(" ").replace(/\s+/g, " ").trim();
+
+      if (pageText) {
+        pageTexts.push(`[Page ${pageNumber}] ${pageText}`);
+      }
+
+      const visualSignals = textItems
+        .filter((item) => /\b(fig(?:ure)?|diagram|table|chart|graph|flowchart|cycle|scheme)\b/i.test(item))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (visualSignals) {
+        diagramTableSignals.push(`[Page ${pageNumber}] ${visualSignals}`);
+      }
+    }
+
+    const extractedText = pageTexts.join("\n\n").trim();
+    const visualNote = diagramTableSignals.length
+      ? `\n\n[Detected diagram/table/caption signals]\n${diagramTableSignals.join("\n")}`
+      : "";
+    const warning =
+      extractedText.length < 500
+        ? "\n\n[Extraction warning] This PDF appears to be image-heavy or scanned. Only selectable text and visible captions could be extracted. Do not invent diagram/table details that are not present in extracted text."
+        : "";
+
+    console.log(`Extracted PDF client-side "${file.name}" with ${extractedText.length} characters across ${pdf.numPages} pages.`);
+    return `${extractedText}${visualNote}${warning}`.trim();
+  } catch (error) {
+    console.log("File rejected due to browser PDF extraction failure", {
+      fileName: file.name,
+      fileType: file.type || "missing",
+      fileSize: file.size,
+      error,
+    });
+    throw new Error(
+      `Could not read ${file.name} in this browser. Refresh and try again, or use Chrome/desktop. If it is a scanned PDF, upload an OCR PDF with selectable text.`,
+    );
+  } finally {
+    await pdf?.destroy?.();
+  }
 }
 
 async function extractDocxTextInBrowser(file: File) {
@@ -404,7 +534,6 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [databaseBacked, setDatabaseBacked] = useState(false);
   const [isUsageSyncing, setIsUsageSyncing] = useState(false);
   const [usage, setUsage] = useState<UsageState>(() => {
     if (typeof window === "undefined") return { freeUsed: 0, monthKey: "" };
@@ -413,8 +542,8 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
 
   useEffect(() => {
     if (!authUser?.emailVerified) {
-      setUsage(getUsageState());
-      return;
+      const timer = window.setTimeout(() => setUsage(getUsageState()), 0);
+      return () => window.clearTimeout(timer);
     }
 
     const timer = window.setTimeout(async () => {
@@ -422,7 +551,6 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
       try {
         const synced = await fetchAccountUsage();
         setUsage(synced.usage);
-        setDatabaseBacked(synced.databaseBacked);
       } catch {
         setError("Could not sync your verified Clerk account usage. Refresh or try again in a moment.");
       } finally {
@@ -499,7 +627,6 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
       const synced = await fetchAccountUsage();
       currentUsage = synced.usage;
       setUsage(currentUsage);
-      setDatabaseBacked(synced.databaseBacked);
     } catch {
       setError("Could not sync your Clerk usage. Please refresh and try again.");
       setIsUsageSyncing(false);
@@ -557,7 +684,6 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
       setSummary(data.summary);
       if (data.usage) {
         setUsage(storeUsageState(data.usage));
-        setDatabaseBacked(Boolean(data.databaseBacked));
       } else {
         setUsage(recordSuccessfulSummary(currentUsage));
       }
