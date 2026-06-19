@@ -34,3 +34,33 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Clerk Authentication
+
+JustFlamsit uses Clerk for authentication. Configure these environment variables locally and in Vercel:
+
+```bash
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_SITE_URL=https://justflamsit.com
+```
+
+In the Clerk dashboard:
+
+- Set the production application URL to `https://justflamsit.com`.
+- Enable email verification for sign-ups.
+- Enable email OTP or magic link sign-in.
+- Enable Google OAuth if the Google provider is configured.
+- Add these redirect URLs:
+  - `https://justflamsit.com/sign-in`
+  - `https://justflamsit.com/sign-up`
+  - `https://justflamsit.com`
+
+In Vercel:
+
+1. Open the `summarise_website` project.
+2. Go to Settings -> Environment Variables.
+3. Add `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `NEXT_PUBLIC_SITE_URL`.
+4. Redeploy the latest branch or pull request.
+
+Signed-in usage, feedback, and summary history metadata are keyed to Clerk `userId` and verified email. Uploaded document content is not stored.

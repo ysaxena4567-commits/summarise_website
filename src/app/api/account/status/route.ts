@@ -1,33 +1,21 @@
 import { NextResponse } from "next/server";
 import { accountIdentityFromClerk, requireVerifiedClerkIdentity } from "@/lib/clerkIdentity";
-import { getServerAccount, remainingSummaries } from "@/lib/serverUsage";
+import { getServerAccount } from "@/lib/serverUsage";
 
 export const runtime = "nodejs";
 
 export async function POST() {
   try {
-    const verified = await requireVerifiedClerkIdentity();
+    const clerk = await requireVerifiedClerkIdentity();
 
-    if (!verified.identity) {
-      return NextResponse.json({ error: verified.error }, { status: verified.status });
+    if (!clerk.identity) {
+      return NextResponse.json({ error: clerk.error }, { status: clerk.status });
     }
 
-    const accountIdentity = accountIdentityFromClerk(verified.identity);
-    const { account, databaseBacked } = await getServerAccount(accountIdentity);
+    const { account, databaseBacked } = await getServerAccount(accountIdentityFromClerk(clerk.identity));
 
     return NextResponse.json({
-      account: {
-        ...account,
-        userId: verified.identity.userId,
-        email: verified.identity.email,
-        emailVerified: verified.identity.emailVerified,
-      },
-      identity: {
-        userId: verified.identity.userId,
-        email: verified.identity.email,
-        emailVerified: verified.identity.emailVerified,
-      },
-      remaining: remainingSummaries(account),
+      account,
       databaseBacked,
     });
   } catch (error) {

@@ -59,7 +59,7 @@ const legacyAuthRedirectScript = `
   const legacyAuthText = [
     "create your free justflamsit account",
     "continue with email",
-    "your usage and pro plan are synced to this email"
+    "your usage is synced to this email"
   ];
 
   const pageHasLegacyAuthModal = () => {

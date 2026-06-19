@@ -1,11 +1,6 @@
 import { del, get, put } from "@vercel/blob";
 import { Redis } from "@upstash/redis";
-import {
-  FREE_SUMMARY_LIMIT,
-  PRO_ACCESS_DAYS,
-  PRO_MONTHLY_SUMMARY_LIMIT,
-  type UsageState,
-} from "@/lib/usage";
+import type { UsageState } from "@/lib/usage";
 import type { AccountIdentity } from "@/lib/clerkIdentity";
 
 type AccountRecord = UsageState & {
@@ -13,12 +8,6 @@ type AccountRecord = UsageState & {
   email: string;
   userId?: string;
   updatedAt: string;
-  proActivatedAt?: string;
-  proExpiresAt?: string;
-  lastPaymentOrderId?: string;
-  lastPaymentId?: string | null;
-  paymentStatus?: "none" | "paid";
-  subscriptionStatus?: "none" | "active" | "expired";
   summaryHistory?: SummaryMetadata[];
   feedback?: FeedbackMetadata[];
 };
@@ -61,14 +50,6 @@ let accountStore: AccountStore | undefined;
 function monthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function addThirtyDays(date: Date) {
-  return new Date(date.getTime() + PRO_ACCESS_DAYS * 24 * 60 * 60 * 1000);
-}
-
-function isExpired(date?: string) {
-  return Boolean(date && Number.isFinite(Date.parse(date)) && Date.parse(date) <= Date.now());
 }
 
 export function normalizeEmail(email?: string | null) {
@@ -141,12 +122,9 @@ function freshAccount(identity: AccountIdentity): AccountRecord {
     identityKey: identity.key,
     email: identity.email,
     userId: identity.userId,
-    plan: "free",
     freeUsed: 0,
-    proUsed: 0,
+    summaryCount: 0,
     monthKey: monthKey(),
-    paymentStatus: "none",
-    subscriptionStatus: "none",
     summaryHistory: [],
     feedback: [],
     updatedAt: new Date().toISOString(),
@@ -154,49 +132,21 @@ function freshAccount(identity: AccountIdentity): AccountRecord {
 }
 
 function normalizeAccount(identity: AccountIdentity, account?: Partial<AccountRecord> | null): AccountRecord {
-  const currentMonth = monthKey();
-  const rawPlan = account?.plan === "pro" ? "pro" : "free";
-  const fallbackExpiresAt =
-    rawPlan === "pro" && account?.proActivatedAt
-      ? addThirtyDays(new Date(account.proActivatedAt)).toISOString()
-      : undefined;
-  const proExpiresAt = account?.proExpiresAt || fallbackExpiresAt;
-  const proExpired = rawPlan === "pro" && isExpired(proExpiresAt);
-  const plan: UsageState["plan"] = rawPlan === "pro" && !proExpired ? "pro" : "free";
-  const normalized: AccountRecord = {
+  const summaryCount = Math.max(Number(account?.summaryCount ?? account?.freeUsed ?? 0), 0);
+
+  return {
     ...freshAccount(identity),
     ...account,
     identityKey: identity.key,
     email: identity.email || normalizeEmail(account?.email),
     userId: identity.userId || account?.userId,
-    plan,
-    freeUsed: proExpired
-      ? FREE_SUMMARY_LIMIT
-      : Math.min(Math.max(Number(account?.freeUsed ?? 0), 0), FREE_SUMMARY_LIMIT),
-    proUsed: plan === "pro" ? Math.max(Number(account?.proUsed ?? 0), 0) : 0,
-    monthKey: account?.monthKey || currentMonth,
-    proExpiresAt: plan === "pro" ? proExpiresAt : undefined,
-    paymentStatus: plan === "pro" ? "paid" : account?.paymentStatus || "none",
-    subscriptionStatus: plan === "pro" ? "active" : proExpired ? "expired" : "none",
+    freeUsed: summaryCount,
+    summaryCount,
+    monthKey: account?.monthKey || monthKey(),
     summaryHistory: account?.summaryHistory?.slice(-25) || [],
     feedback: account?.feedback?.slice(-25) || [],
     updatedAt: new Date().toISOString(),
   };
-
-  if (normalized.plan === "free" && normalized.monthKey !== currentMonth) {
-    normalized.monthKey = currentMonth;
-    normalized.proUsed = 0;
-  }
-
-  return normalized;
-}
-
-export function remainingSummaries(account: UsageState) {
-  if (account.plan === "pro") {
-    return Math.max(PRO_MONTHLY_SUMMARY_LIMIT - account.proUsed, 0);
-  }
-
-  return Math.max(FREE_SUMMARY_LIMIT - account.freeUsed, 0);
 }
 
 async function readAccount(identityKey: string) {
@@ -285,7 +235,7 @@ async function acquireAccountLock(identityKey: string, store: Exclude<AccountSto
             await del(path);
           }
         } catch {
-          // Keep retrying; the active request may still finish and release the lock.
+          // Retry until the lock owner finishes or expires.
         }
       }
     }
@@ -314,7 +264,7 @@ async function releaseAccountLock(lock: Awaited<ReturnType<typeof acquireAccount
       await del(lock.path);
     }
   } catch {
-    // Lock expiry/cleanup is best-effort; Redis locks expire automatically and Blob locks are retried around.
+    // Lock cleanup is best-effort; Redis locks expire automatically and Blob locks are retried around.
   }
 }
 
@@ -358,16 +308,11 @@ export async function consumeServerSummary(identityInput: string | AccountIdenti
   return withAccountLock(identity.key, async () => {
     const stored = await readAccount(identity.key);
     const account = normalizeAccount(identity, stored);
-
-    if (remainingSummaries(account) <= 0) {
-      await writeAccount(account);
-      return { allowed: false, account, databaseBacked: true };
-    }
-
+    const nextCount = (account.summaryCount ?? account.freeUsed) + 1;
     const nextAccount: AccountRecord = {
       ...account,
-      freeUsed: account.plan === "free" ? Math.min(account.freeUsed + 1, FREE_SUMMARY_LIMIT) : account.freeUsed,
-      proUsed: account.plan === "pro" ? Math.min(account.proUsed + 1, PRO_MONTHLY_SUMMARY_LIMIT) : account.proUsed,
+      freeUsed: nextCount,
+      summaryCount: nextCount,
       updatedAt: new Date().toISOString(),
     };
 
@@ -387,46 +332,11 @@ export async function refundServerSummary(identityInput: string | AccountIdentit
   return withAccountLock(identity.key, async () => {
     const stored = await readAccount(identity.key);
     const account = normalizeAccount(identity, stored);
+    const nextCount = Math.max((account.summaryCount ?? account.freeUsed) - 1, 0);
     const nextAccount: AccountRecord = {
       ...account,
-      freeUsed: account.plan === "free" ? Math.max(account.freeUsed - 1, 0) : account.freeUsed,
-      proUsed: account.plan === "pro" ? Math.max(account.proUsed - 1, 0) : account.proUsed,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await writeAccount(nextAccount);
-    return { account: nextAccount, databaseBacked: true };
-  });
-}
-
-export async function activateServerPro(identityInput: string | AccountIdentity, orderId: string, paymentId?: string | null) {
-  const identity = normalizeIdentity(identityInput);
-  const store = getAccountStore();
-
-  if (!identity.key || !store) {
-    return { account: freshAccount(identity), databaseBacked: false };
-  }
-
-  return withAccountLock(identity.key, async () => {
-    const stored = await readAccount(identity.key);
-    const account = normalizeAccount(identity, stored);
-    const activatedAt = new Date();
-
-    if (account.plan === "pro" && account.lastPaymentOrderId === orderId) {
-      return { account, databaseBacked: true };
-    }
-
-    const nextAccount: AccountRecord = {
-      ...account,
-      plan: "pro",
-      proUsed: 0,
-      monthKey: monthKey(),
-      proActivatedAt: activatedAt.toISOString(),
-      proExpiresAt: addThirtyDays(activatedAt).toISOString(),
-      lastPaymentOrderId: orderId,
-      lastPaymentId: paymentId,
-      paymentStatus: "paid",
-      subscriptionStatus: "active",
+      freeUsed: nextCount,
+      summaryCount: nextCount,
       updatedAt: new Date().toISOString(),
     };
 

@@ -8,7 +8,6 @@ import {
   ChevronDown,
   Clipboard,
   Clock3,
-  CreditCard,
   Download,
   FileText,
   FileUp,
@@ -28,9 +27,6 @@ import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
-  FREE_SUMMARY_LIMIT,
-  canGenerateSummary,
-  getRemainingSummaries,
   getUsageState,
   recordSuccessfulSummary,
   storeUsageState,
@@ -41,22 +37,29 @@ const navItems = [
   { label: "Features", href: "#features" },
   { label: "How It Works", href: "#how-it-works" },
   { label: "Use Cases", href: "#use-cases" },
-  { label: "Upgrade", href: "#upgrade" },
   { label: "FAQ", href: "#faq" },
 ];
 
 const features = [
   "PDF, DOCX, and TXT upload support",
   "Grounded summaries from uploaded content",
-  "Key points, action items, dates, and risks",
-  "Usage and Pro status connected to Clerk identity",
+  "Chapter-style structure with practical PYQ revision notes",
+  "Free summary generation tied to Clerk identity",
 ];
 
 const faqs = [
   ["Which auth system does JustFlamsit use?", "JustFlamsit uses Clerk for sign-in, sign-up, email verification, Google login, sessions, and user identity."],
-  ["Can I use the first free summary without signing in?", "The app keeps the first flow simple, but saving usage, payments, history, and account data requires a verified Clerk email."],
+  ["Can I use JustFlamsit for free?", "Yes. JustFlamsit is now a streamlined free utility for generating grounded document summaries."],
   ["Are uploaded documents stored?", "No. Files are sent only for summary generation and are not stored as account history content."],
 ];
+
+const socialLinks = [
+  { label: "X / Twitter", href: "https://x.com/justflamsit", mark: "X" },
+  { label: "LinkedIn", href: "https://www.linkedin.com/company/justflamsit", mark: "in" },
+  { label: "Reddit", href: "https://www.reddit.com/user/justflamsit", mark: "r" },
+  { label: "GitHub", href: "https://github.com/ysaxena4567-commits/summarise_website", mark: "GH" },
+  { label: "Instagram", href: "https://www.instagram.com/justflamsit", mark: "IG" },
+] as const;
 
 type UploadedFile = {
   id: string;
@@ -81,28 +84,7 @@ type SummarizeResponse = {
   error?: string;
   usage?: UsageState;
   databaseBacked?: boolean;
-  upgradeRequired?: boolean;
 };
-
-type PaymentOrderResponse = {
-  orderId?: string;
-  paymentSessionId?: string;
-  mode?: "sandbox" | "production";
-  error?: string;
-};
-
-type CashfreeCheckout = {
-  checkout: (options: {
-    paymentSessionId: string;
-    redirectTarget?: "_self" | "_blank" | "_top" | "_modal";
-  }) => Promise<unknown> | void;
-};
-
-declare global {
-  interface Window {
-    Cashfree?: (options: { mode: "sandbox" | "production" }) => CashfreeCheckout;
-  }
-}
 
 function Logo() {
   return (
@@ -131,62 +113,72 @@ function Header({ authUser }: { authUser: AuthUser | null }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#28282b]/86 backdrop-blur-xl">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8" aria-label="Primary navigation">
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-[#28282b]/88 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
         <Logo />
-        <div className="hidden items-center gap-8 md:flex">
+
+        <nav className="hidden items-center gap-7 lg:flex" aria-label="Primary navigation">
           {navItems.map((item) => (
-            <a key={item.href} href={item.href} className="text-sm font-medium text-zinc-300 transition hover:text-white">
+            <a key={item.href} href={item.href} className="text-sm font-medium text-zinc-300 transition hover:text-[#c5b358]">
               {item.label}
             </a>
           ))}
-        </div>
-        <div className="hidden md:block">
+        </nav>
+
+        <div className="hidden items-center gap-3 lg:flex">
           {authUser ? (
-            <div className="inline-flex min-h-11 items-center gap-3 rounded-lg border border-white/10 px-3 text-sm font-semibold text-zinc-200">
+            <>
+              <span className="max-w-48 truncate text-sm text-zinc-300">{authUser.email}</span>
               <UserButton />
-              <span>{authUser.email.split("@")[0]}</span>
-            </div>
+            </>
           ) : (
-            <SignInButton mode="redirect">
-              <button type="button" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-4 text-sm font-semibold text-[#28282b] transition hover:bg-[#dbc966]">
-                <LogIn size={17} />
-                Sign in
-              </button>
-            </SignInButton>
-          )}
-        </div>
-        <button
-          type="button"
-          className="grid size-11 place-items-center rounded-lg border border-white/10 text-white md:hidden"
-          aria-label={mobileOpen ? "Close menu" : "Open menu"}
-          onClick={() => setMobileOpen((open) => !open)}
-        >
-          {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
-      </nav>
-      {mobileOpen && (
-        <div className="border-t border-white/10 bg-[#28282b] px-4 py-5 md:hidden">
-          <div className="flex flex-col gap-4">
-            {navItems.map((item) => (
-              <a key={item.href} href={item.href} className="text-base font-medium text-zinc-200" onClick={() => setMobileOpen(false)}>
-                {item.label}
-              </a>
-            ))}
-            {authUser ? (
-              <div className="inline-flex min-h-12 items-center justify-center gap-3 rounded-lg border border-white/10 px-4 text-sm font-semibold text-white">
-                <UserButton />
-                {authUser.email.split("@")[0]}
-              </div>
-            ) : (
+            <>
               <SignInButton mode="redirect">
-                <button type="button" onClick={() => setMobileOpen(false)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-4 text-sm font-semibold text-[#28282b]">
-                  <LogIn size={17} />
+                <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-semibold text-white transition hover:border-[#c5b358]/60">
+                  <LogIn size={16} />
                   Sign in
                 </button>
               </SignInButton>
-            )}
-          </div>
+              <PrimaryLink href="/sign-up">Start free</PrimaryLink>
+            </>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setMobileOpen((open) => !open)}
+          className="grid size-10 place-items-center rounded-lg border border-white/10 text-white lg:hidden"
+          aria-label="Open mobile menu"
+          aria-expanded={mobileOpen}
+        >
+          {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
+      </div>
+
+      {mobileOpen && (
+        <div className="border-t border-white/10 bg-[#28282b] px-4 pb-4 lg:hidden">
+          <nav className="grid gap-2 py-3" aria-label="Mobile navigation">
+            {navItems.map((item) => (
+              <a key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-white/5">
+                {item.label}
+              </a>
+            ))}
+          </nav>
+          {authUser ? (
+            <div className="flex items-center justify-between rounded-lg border border-white/10 p-3">
+              <span className="truncate text-sm text-zinc-300">{authUser.email}</span>
+              <UserButton />
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              <SignInButton mode="redirect">
+                <button type="button" className="min-h-11 rounded-lg border border-white/10 text-sm font-semibold text-white">
+                  Sign in
+                </button>
+              </SignInButton>
+              <PrimaryLink href="/sign-up">Start free</PrimaryLink>
+            </div>
+          )}
         </div>
       )}
     </header>
@@ -200,10 +192,8 @@ function formatBytes(bytes: number) {
 }
 
 function formatUsageLabel(usage: UsageState) {
-  const remaining = getRemainingSummaries(usage);
-  return usage.plan === "pro"
-    ? `${remaining} summaries remaining in your Pro period`
-    : `${remaining} of ${FREE_SUMMARY_LIMIT} trial summaries remaining`;
+  const total = usage.summaryCount ?? usage.freeUsed ?? 0;
+  return total === 1 ? "1 summary generated" : `${total} summaries generated`;
 }
 
 async function fetchAccountUsage() {
@@ -255,7 +245,7 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
   const [databaseBacked, setDatabaseBacked] = useState(false);
   const [isUsageSyncing, setIsUsageSyncing] = useState(false);
   const [usage, setUsage] = useState<UsageState>(() => {
-    if (typeof window === "undefined") return { plan: "free", freeUsed: 0, proUsed: 0, monthKey: "" };
+    if (typeof window === "undefined") return { freeUsed: 0, monthKey: "" };
     return getUsageState();
   });
 
@@ -320,7 +310,7 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
     }
 
     if (!authUser.emailVerified) {
-      setError("Verify your email in Clerk before saving usage, payment, or history details.");
+      setError("Verify your email in Clerk before saving usage or history details.");
       requireClerkSignIn();
       return;
     }
@@ -339,18 +329,12 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
       setUsage(currentUsage);
       setDatabaseBacked(synced.databaseBacked);
     } catch {
-      setError("Could not verify your remaining summaries. Please refresh and try again.");
+      setError("Could not sync your Clerk usage. Please refresh and try again.");
       setIsUsageSyncing(false);
       return;
     }
 
     setIsUsageSyncing(false);
-
-    if (!canGenerateSummary(currentUsage)) {
-      setError("Your current summary limit is finished. Upgrade to continue.");
-      return;
-    }
-
     setIsLoading(true);
     setError("");
     setSummary("");
@@ -369,9 +353,6 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
 
       if (!response.ok || !data.summary) {
         if (response.status === 401) requireClerkSignIn();
-        if (response.status === 402 || data.upgradeRequired) {
-          throw new Error(data.error || "Your current summary limit is finished. Upgrade to continue.");
-        }
         throw new Error(data.error || "The document could not be summarized.");
       }
 
@@ -416,7 +397,7 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">AI Summarizer</p>
-            <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Upload files and review the summary side by side</h2>
+            <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Upload chapter and PYQ files, then generate</h2>
             <p className="mt-3 text-base leading-7 text-zinc-300">PDFs, DOCX, and TXT files are processed only for summary generation.</p>
             <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[#c5b358]/30 bg-[#c5b358]/10 px-3 py-2 text-sm font-semibold text-[#f2e7a5]">
               {isUsageSyncing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
@@ -456,7 +437,7 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
                 <FileUp size={26} />
               </span>
               <span className="mt-5 text-xl font-semibold text-white">Drag and drop files here</span>
-              <span className="mt-2 max-w-md text-sm leading-6 text-zinc-400">Upload up to 5 files. Supported formats: PDF, DOCX, and TXT.</span>
+              <span className="mt-2 max-w-md text-sm leading-6 text-zinc-400">Upload up to 5 chapter, PYQ, or notes files. Supported formats: PDF, DOCX, and TXT.</span>
               <span className="mt-5 rounded-lg border border-white/10 px-4 py-2 text-sm font-semibold text-white">Browse files</span>
               <input
                 id="document-upload"
@@ -504,7 +485,7 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
               onChange={(event) => setInstructions(event.target.value)}
               rows={4}
               maxLength={1000}
-              placeholder="Example: make it short, include key points, focus on deadlines, or extract action items."
+              placeholder="Example: make it short, include key points, focus on PYQ links, or extract revision notes."
               className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/10 bg-[#0f0f11] px-4 py-3 text-sm leading-6 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70 focus:ring-2 focus:ring-[#c5b358]/15"
             />
 
@@ -519,7 +500,7 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
               <div className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-semibold text-white">AI Summary Output</p>
-                  <p className="mt-1 text-xs text-zinc-500">Executive summary, key points, action items, and risks.</p>
+                  <p className="mt-1 text-xs text-zinc-500">Upload files and generate a grounded chapter/PYQ summary.</p>
                 </div>
                 <div className="flex gap-2">
                   <button type="button" onClick={copySummary} disabled={!summary} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm font-semibold text-zinc-200 transition hover:border-[#c5b358]/50 disabled:cursor-not-allowed disabled:opacity-45">
@@ -552,138 +533,6 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
   );
 }
 
-function loadCashfreeSdk() {
-  return new Promise<void>((resolve, reject) => {
-    if (window.Cashfree) {
-      resolve();
-      return;
-    }
-
-    const existingScript = document.querySelector<HTMLScriptElement>("script[data-cashfree-sdk]");
-    if (existingScript) {
-      existingScript.addEventListener("load", () => resolve(), { once: true });
-      existingScript.addEventListener("error", () => reject(new Error("Cashfree checkout could not load.")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
-    script.async = true;
-    script.dataset.cashfreeSdk = "true";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Cashfree checkout could not load."));
-    document.head.appendChild(script);
-  });
-}
-
-function PricingSection({ authUser }: { authUser: AuthUser | null }) {
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [paymentError, setPaymentError] = useState("");
-  const [isStartingPayment, setIsStartingPayment] = useState(false);
-
-  const startCheckout = async () => {
-    if (!authUser?.email) {
-      window.location.assign("/sign-in");
-      return;
-    }
-
-    if (!authUser.emailVerified) {
-      setPaymentError("Verify your email in Clerk before upgrading.");
-      window.location.assign("/sign-in");
-      return;
-    }
-
-    setIsStartingPayment(true);
-    setPaymentError("");
-
-    try {
-      const response = await fetch("/api/payments/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerName, customerPhone }),
-      });
-      const data = (await response.json()) as PaymentOrderResponse;
-
-      if (!response.ok || !data.paymentSessionId) {
-        throw new Error(data.error || "Unable to start Cashfree checkout.");
-      }
-
-      await loadCashfreeSdk();
-      if (!window.Cashfree) throw new Error("Cashfree checkout is unavailable. Please try again.");
-
-      const cashfree = window.Cashfree({ mode: data.mode ?? "sandbox" });
-      cashfree.checkout({ paymentSessionId: data.paymentSessionId, redirectTarget: "_self" });
-    } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : "Payment could not be started.");
-      setIsStartingPayment(false);
-    }
-  };
-
-  return (
-    <section id="upgrade" className="border-y border-white/10 bg-[#202024] px-4 py-16 sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-stretch">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Upgrade</p>
-          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Upgrade to JustFlamsit Pro with Clerk verified identity</h2>
-          <p className="mt-4 text-base leading-8 text-zinc-300">Payment, subscription status, and usage are attached to your Clerk user ID and verified email.</p>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            {["Clerk verified email required", "Server-side payment verification", "No secret keys in browser", "No uploaded document storage"].map((item) => (
-              <div key={item} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-sm font-semibold text-zinc-200">
-                <Check size={16} className="text-[#c5b358]" />
-                {item}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-[#161618] p-5 shadow-2xl shadow-black/20">
-          <div className="rounded-xl border border-[#c5b358]/30 bg-[#c5b358]/[0.08] p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="text-xl font-semibold text-white">JustFlamsit Pro</h3>
-                <p className="mt-1 text-sm text-zinc-400">For regular document work</p>
-              </div>
-              <div className="text-left sm:text-right">
-                <p className="text-4xl font-semibold text-white">Rs. 199</p>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#f2e7a5]">per month</p>
-              </div>
-            </div>
-            <ul className="mt-5 space-y-3 text-sm text-zinc-200">
-              {["50 summaries per month", "Clean exports", "Priority processing", "Early access to new features"].map((item) => (
-                <li key={item} className="flex items-center gap-3"><Check size={16} className="text-[#c5b358]" />{item}</li>
-              ))}
-            </ul>
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <label>
-                <span className="text-sm font-semibold text-zinc-200">Name</span>
-                <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} type="text" placeholder="Your name" className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70" />
-              </label>
-              <label>
-                <span className="text-sm font-semibold text-zinc-200">Phone</span>
-                <input value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} type="tel" placeholder="10 digit phone number" className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-[#0f0f11] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-[#c5b358]/70" />
-              </label>
-            </div>
-
-            {paymentError && (
-              <div className="mt-4 flex gap-3 rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm leading-6 text-red-100">
-                <AlertTriangle size={17} className="mt-1 shrink-0" />
-                {paymentError}
-              </div>
-            )}
-
-            <button type="button" onClick={startCheckout} disabled={isStartingPayment} className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#c5b358] px-5 text-sm font-semibold text-[#28282b] transition hover:bg-[#dbc966] disabled:cursor-not-allowed disabled:opacity-70">
-              {isStartingPayment ? <Loader2 size={18} className="animate-spin" /> : <CreditCard size={18} />}
-              {authUser ? "Upgrade with Cashfree" : "Sign in to upgrade"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function Home() {
   const { user, isLoaded } = useUser();
   const primaryEmail = user?.primaryEmailAddress;
@@ -707,10 +556,10 @@ export default function Home() {
           <div className="flex flex-col justify-center">
             <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-[#c5b358]/35 bg-[#c5b358]/10 px-3 py-2 text-sm font-semibold text-[#f2e7a5] shadow-[0_0_32px_rgba(197,179,88,0.08)]">
               <BadgeCheck size={16} />
-              Clerk-secured document intelligence
+              Free Clerk-secured document intelligence
             </div>
             <h1 className="mt-7 max-w-4xl text-5xl font-semibold leading-[1.02] tracking-normal text-white sm:text-6xl lg:text-7xl">Turn 100-page documents into 1-minute insights</h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-200 sm:text-xl">Use AI to summarize reports, PDFs, assignments, contracts, research papers, and lengthy files into clear, actionable summaries.</p>
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-200 sm:text-xl">Upload chapter notes and PYQ files, then generate a clean, grounded summary from your documents.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               {authUser ? <PrimaryLink href="#summarizer">Open summarizer</PrimaryLink> : <PrimaryLink href="/sign-up">Start free</PrimaryLink>}
               <a href="#how-it-works" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/15 px-5 text-sm font-semibold text-white transition hover:border-[#c5b358]/70 hover:bg-white/5">
@@ -727,10 +576,10 @@ export default function Home() {
           <div className="rounded-2xl border border-white/12 bg-[#1d1d20]/95 p-4 shadow-[0_30px_90px_rgba(0,0,0,0.42)]">
             <div className="rounded-xl border border-white/10 bg-[#0f0f11] p-5">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Workspace preview</p>
-              <h2 className="mt-2 text-3xl font-semibold text-white">Summary intelligence</h2>
+              <h2 className="mt-2 text-3xl font-semibold text-white">Chapter + PYQ summary</h2>
               <p className="mt-3 text-sm leading-6 text-zinc-400">Upload documents, verify identity with Clerk, and keep usage tied to your account.</p>
               <div className="mt-5 grid gap-3">
-                {["Research paper.pdf", "Quarterly report.pdf", "Contract draft.docx"].map((file, index) => (
+                {["Chapter notes.pdf", "Previous year questions.pdf", "Class handout.docx"].map((file, index) => (
                   <div key={file} className="rounded-lg border border-white/10 bg-[#252529] p-3">
                     <div className="flex items-center justify-between gap-3">
                       <p className="truncate text-sm font-semibold text-zinc-100">{file}</p>
@@ -764,12 +613,11 @@ export default function Home() {
       </section>
 
       <SummarizerSection authUser={authUser} />
-      <PricingSection authUser={authUser} />
 
       <section id="features" className="px-4 py-16 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">Features</p>
-          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Everything routes through Clerk</h2>
+          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Focused on one fast summary flow</h2>
           <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {features.map((feature) => (
               <div key={feature} className="rounded-lg border border-white/10 bg-white/[0.04] p-5 text-sm font-semibold leading-6 text-zinc-200">
@@ -788,8 +636,8 @@ export default function Home() {
           <div className="mt-8 grid gap-5 md:grid-cols-3">
             {[
               ["Sign in with Clerk", "Use Clerk email verification, OTP/magic link, or Google login."],
-              ["Upload documents", "Files are processed only for summary generation."],
-              ["Save account data", "Usage, payment, subscription, feedback, and history metadata use your Clerk user ID and verified email."],
+              ["Upload chapter and PYQ files", "Files are processed only for summary generation."],
+              ["Generate the summary", "Usage, feedback, and history metadata use your Clerk user ID and verified email."],
             ].map(([title, copy], index) => (
               <div key={title} className="rounded-lg border border-white/10 bg-[#28282b] p-7">
                 <span className="text-5xl font-semibold text-[#c5b358]">0{index + 1}</span>
@@ -805,7 +653,7 @@ export default function Home() {
         <div className="mx-auto max-w-7xl rounded-2xl border border-[#c5b358]/30 bg-[linear-gradient(135deg,rgba(197,179,88,0.18),rgba(255,255,255,0.04))] p-8 text-center shadow-2xl shadow-black/25 sm:p-12">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#f2e7a5]">Start Free</p>
           <h2 className="mt-4 text-4xl font-semibold text-white sm:text-5xl">Stop reading hundreds of pages. Start getting answers.</h2>
-          <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-200">Join students, professionals, and researchers using Clerk-secured JustFlamsit accounts.</p>
+          <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-200">Use a Clerk-secured JustFlamsit account to generate clear document summaries.</p>
           <div className="mt-8 flex justify-center">
             {authUser ? <PrimaryLink href="#summarizer">Open summarizer</PrimaryLink> : <PrimaryLink href="/sign-up">Get started</PrimaryLink>}
           </div>
@@ -836,10 +684,29 @@ export default function Home() {
             <Logo />
             <p className="mt-3 text-sm leading-6 text-zinc-400">AI-powered document intelligence secured by Clerk.</p>
           </div>
-          <a href="mailto:support@justflamsit.com" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-[#c5b358]/60 hover:text-white">
-            <Mail size={17} className="text-[#c5b358]" />
-            support@justflamsit.com
-          </a>
+          <div className="flex flex-col items-start gap-4 sm:items-end">
+            <a href="mailto:support@justflamsit.com" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-[#c5b358]/60 hover:text-white">
+              <Mail size={17} className="text-[#c5b358]" />
+              support@justflamsit.com
+            </a>
+            <div className="flex flex-col gap-2 sm:items-end">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#f2e7a5]">Follow us</p>
+              <div className="flex flex-wrap gap-2">
+                {socialLinks.map(({ label, href, mark }) => (
+                  <a
+                    key={label}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Follow JustFlamsit on ${label}`}
+                    className="grid size-10 place-items-center rounded-lg border border-white/10 bg-white/[0.03] text-zinc-300 transition hover:scale-105 hover:border-[#c5b358]/60 hover:text-[#c5b358]"
+                  >
+                    <span className="text-xs font-bold leading-none">{mark}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </footer>
     </main>

@@ -36,7 +36,7 @@ function legacyAuthModalVisible() {
       return (
         text.includes("create your free justflamsit account") ||
         text.includes("continue with email") ||
-        text.includes("your usage and pro plan are synced to this email")
+        text.includes("your usage is synced to this email")
       );
     }),
   );

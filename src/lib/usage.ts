@@ -1,38 +1,14 @@
-export const FREE_SUMMARY_LIMIT = 3;
-export const PRO_MONTHLY_SUMMARY_LIMIT = 50;
-export const PRO_ACCESS_DAYS = 30;
 export const USAGE_STORAGE_KEY = "justflamsit-usage";
-export const PLAN_STORAGE_KEY = "justflamsit-plan";
-
-export type PlanStatus = "free" | "pro";
 
 export type UsageState = {
-  plan: PlanStatus;
   freeUsed: number;
-  proUsed: number;
   monthKey: string;
-  proExpiresAt?: string;
-};
-
-type StoredPlan = {
-  plan?: PlanStatus;
-  orderId?: string;
-  paymentId?: string | null;
-  activatedAt?: string;
-  proExpiresAt?: string;
+  summaryCount?: number;
 };
 
 function currentMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function addThirtyDays(date: Date) {
-  return new Date(date.getTime() + PRO_ACCESS_DAYS * 24 * 60 * 60 * 1000);
-}
-
-function isExpired(date?: string) {
-  return Boolean(date && Number.isFinite(Date.parse(date)) && Date.parse(date) <= Date.now());
 }
 
 function readJson<T>(key: string): T | null {
@@ -47,105 +23,43 @@ function readJson<T>(key: string): T | null {
   }
 }
 
+function normalizeUsage(usage?: Partial<UsageState> | null): UsageState {
+  const summaryCount = Math.max(Number(usage?.summaryCount ?? usage?.freeUsed ?? 0), 0);
+
+  return {
+    freeUsed: summaryCount,
+    summaryCount,
+    monthKey: usage?.monthKey || currentMonthKey(),
+  };
+}
+
 function writeUsage(usage: UsageState) {
-  window.localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(usage));
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(normalizeUsage(usage)));
 }
 
 export function storeUsageState(usage: UsageState) {
-  if (typeof window === "undefined") return usage;
-
-  writeUsage(usage);
-  window.localStorage.setItem(
-    PLAN_STORAGE_KEY,
-    JSON.stringify({
-      plan: usage.plan,
-      proExpiresAt: usage.proExpiresAt,
-      activatedAt: new Date().toISOString(),
-    }),
-  );
-  return usage;
+  const normalized = normalizeUsage(usage);
+  writeUsage(normalized);
+  return normalized;
 }
 
 export function getUsageState(): UsageState {
   const storedUsage = readJson<Partial<UsageState>>(USAGE_STORAGE_KEY);
-  const storedPlan = readJson<StoredPlan>(PLAN_STORAGE_KEY);
-  const monthKey = currentMonthKey();
-  const fallbackExpiresAt =
-    storedPlan?.activatedAt && storedPlan.plan === "pro"
-      ? addThirtyDays(new Date(storedPlan.activatedAt)).toISOString()
-      : undefined;
-  const proExpiresAt = storedUsage?.proExpiresAt || storedPlan?.proExpiresAt || fallbackExpiresAt;
-  const proExpired =
-    (storedPlan?.plan === "pro" || storedUsage?.plan === "pro") && isExpired(proExpiresAt);
-  const plan: PlanStatus =
-    (storedPlan?.plan === "pro" || storedUsage?.plan === "pro") && !proExpired
-      ? "pro"
-      : "free";
-  const usage: UsageState = {
-    plan,
-    freeUsed: proExpired
-      ? FREE_SUMMARY_LIMIT
-      : Math.min(Math.max(Number(storedUsage?.freeUsed ?? 0), 0), FREE_SUMMARY_LIMIT),
-    proUsed: plan === "pro" ? Math.max(Number(storedUsage?.proUsed ?? 0), 0) : 0,
-    monthKey: storedUsage?.monthKey || monthKey,
-    proExpiresAt: plan === "pro" ? proExpiresAt : undefined,
-  };
-
-  if (usage.plan === "free" && usage.monthKey !== monthKey) {
-    usage.monthKey = monthKey;
-    usage.proUsed = 0;
-  }
-
-  if (typeof window !== "undefined") {
-    writeUsage(usage);
-  }
-
+  const usage = normalizeUsage(storedUsage);
+  writeUsage(usage);
   return usage;
 }
 
-export function getRemainingSummaries(usage: UsageState) {
-  if (usage.plan === "pro") {
-    return Math.max(PRO_MONTHLY_SUMMARY_LIMIT - usage.proUsed, 0);
-  }
-
-  return Math.max(FREE_SUMMARY_LIMIT - usage.freeUsed, 0);
-}
-
-export function canGenerateSummary(usage: UsageState) {
-  return getRemainingSummaries(usage) > 0;
-}
-
 export function recordSuccessfulSummary(usage: UsageState) {
+  const current = normalizeUsage(usage);
   const nextUsage: UsageState = {
-    ...usage,
-    monthKey: usage.monthKey || currentMonthKey(),
-    freeUsed: usage.plan === "free" ? Math.min(usage.freeUsed + 1, FREE_SUMMARY_LIMIT) : usage.freeUsed,
-    proUsed: usage.plan === "pro" ? Math.min(usage.proUsed + 1, PRO_MONTHLY_SUMMARY_LIMIT) : usage.proUsed,
+    ...current,
+    freeUsed: current.freeUsed + 1,
+    summaryCount: (current.summaryCount ?? current.freeUsed) + 1,
+    monthKey: current.monthKey || currentMonthKey(),
   };
 
   writeUsage(nextUsage);
   return nextUsage;
-}
-
-export function activateProPlan(orderId: string, paymentId?: string | null) {
-  const activatedAt = new Date();
-  const proExpiresAt = addThirtyDays(activatedAt).toISOString();
-  const plan: StoredPlan = {
-    plan: "pro",
-    orderId,
-    paymentId,
-    activatedAt: activatedAt.toISOString(),
-    proExpiresAt,
-  };
-  const usage: UsageState = {
-    plan: "pro",
-    freeUsed: readJson<Partial<UsageState>>(USAGE_STORAGE_KEY)?.freeUsed ?? 0,
-    proUsed: 0,
-    monthKey: currentMonthKey(),
-    proExpiresAt,
-  };
-
-  window.localStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(plan));
-  writeUsage(usage);
-  return usage;
 }

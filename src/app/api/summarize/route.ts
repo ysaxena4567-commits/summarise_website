@@ -4,10 +4,8 @@ import PDFParser from "pdf2json";
 import { accountIdentityFromClerk, anonymousIdentity, getClerkIdentity } from "@/lib/clerkIdentity";
 import {
   consumeServerSummary,
-  getServerAccount,
   recordSummaryMetadata,
   refundServerSummary,
-  remainingSummaries,
 } from "@/lib/serverUsage";
 import { clientIp, rateLimit, requireSameOrigin } from "@/lib/security";
 
@@ -19,29 +17,22 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_REQUEST_BYTES = MAX_FILES * MAX_FILE_BYTES + 256_000;
 const MAX_TEXT_CHARS = 240_000;
 const MAX_INSTRUCTION_CHARS = 1_000;
+const fallbackText = "Not found in this document";
 
 type ExtractedDocument = {
   name: string;
   text: string;
 };
 
-type GeminiSummary = {
-  executiveSummary: string[] | string;
-  keyPoints: string[] | string;
-  importantDates: string[] | string;
-  importantPeople: string[] | string;
-  actionItems: string[] | string;
-  risks: string[] | string;
-};
+type GeminiSummary = Record<string, string[] | string | undefined>;
 
-const sectionLabels: Array<[keyof GeminiSummary, string]> = [
-  ["executiveSummary", "Executive Summary"],
-  ["keyPoints", "Key Points"],
-  ["importantDates", "Important Dates"],
-  ["importantPeople", "Important People"],
-  ["actionItems", "Action Items"],
-  ["risks", "Risks"],
-];
+const summarySections = [
+  { key: "chapterSummary", label: "Chapter Summary" },
+  { key: "keyConcepts", label: "Key Concepts" },
+  { key: "pyqConnections", label: "PYQ Connections" },
+  { key: "importantQuestions", label: "Important Questions" },
+  { key: "revisionNotes", label: "Revision Notes" },
+] as const;
 
 async function extractPdfText(buffer: Buffer) {
   return new Promise<string>((resolve, reject) => {
@@ -125,24 +116,27 @@ CRITICAL RULES:
 - Never invent facts.
 - Never guess.
 - Never add information that is not in the document text.
-- If a category has no relevant information, return exactly: Not Mentioned In Document
-- Be thorough. Do not skip names, dates, events, risks, decisions, duties, actions, causes, results, definitions, or important facts that appear in the document.
+- If a category has no relevant information, return exactly: ${fallbackText}
+- Be thorough. Do not skip names, dates, events, causes, results, definitions, examples, or important facts that appear in the document.
 - Preserve original meaning, names, date ranges, and chronology.
-- If the document is educational or historical, include all major rulers, dynasties, dates, events, practices, regions, and consequences mentioned.
+- If chapter notes and previous-year questions are both uploaded, connect topics to questions only when the documents support the connection.
 - If multiple files are uploaded, combine overlapping information only when the documents support it.
+- Keep the response structured with clear headings once formatted.
+- Use bullet-point style strings inside each JSON array.
+- Keep the output student-friendly, concise, and practical for revision.
 
 Return ONLY valid JSON. Do not wrap it in markdown. Do not add commentary.
 The JSON must match this exact shape:
+
 {
-  "executiveSummary": ["..."],
-  "keyPoints": ["..."],
-  "importantDates": ["..."],
-  "importantPeople": ["..."],
-  "actionItems": ["..."],
-  "risks": ["..."]
+  "chapterSummary": ["..."],
+  "keyConcepts": ["..."],
+  "pyqConnections": ["..."],
+  "importantQuestions": ["..."],
+  "revisionNotes": ["..."]
 }
 
-Each array should contain detailed bullet-style strings. If a section has no information, use ["Not Mentioned In Document"].
+Each array should contain detailed bullet-style strings. If a section has no information, use ["${fallbackText}"].
 ${instructionBlock}
 
 Uploaded document text:
@@ -153,14 +147,14 @@ ${sourceText}`;
 function normalizeSection(value: string[] | string | undefined) {
   if (Array.isArray(value)) {
     const items = value.map((item) => String(item).trim()).filter(Boolean);
-    return items.length ? items : ["Not Mentioned In Document"];
+    return items.length ? items : [fallbackText];
   }
 
   if (typeof value === "string" && value.trim()) {
     return [value.trim()];
   }
 
-  return ["Not Mentioned In Document"];
+  return [fallbackText];
 }
 
 function cleanJsonText(text: string) {
@@ -172,8 +166,8 @@ function cleanJsonText(text: string) {
 }
 
 function formatSummary(summary: GeminiSummary) {
-  return sectionLabels
-    .map(([key, label]) => {
+  return summarySections
+    .map(({ key, label }) => {
       const items = normalizeSection(summary[key]);
       const body = items.map((item) => `- ${item.replace(/\s+/g, " ").trim()}`).join("\n");
       return `## ${label}\n${body}`;
@@ -206,15 +200,12 @@ function extractGeminiText(response: unknown) {
   }
 
   try {
-    const parsed = JSON.parse(cleanJsonText(text)) as Partial<GeminiSummary>;
-    return formatSummary({
-      executiveSummary: parsed.executiveSummary ?? ["Not Mentioned In Document"],
-      keyPoints: parsed.keyPoints ?? ["Not Mentioned In Document"],
-      importantDates: parsed.importantDates ?? ["Not Mentioned In Document"],
-      importantPeople: parsed.importantPeople ?? ["Not Mentioned In Document"],
-      actionItems: parsed.actionItems ?? ["Not Mentioned In Document"],
-      risks: parsed.risks ?? ["Not Mentioned In Document"],
-    });
+    const parsed = JSON.parse(cleanJsonText(text)) as GeminiSummary;
+    const normalizedSummary = summarySections.reduce<GeminiSummary>((accumulator, section) => {
+      accumulator[section.key] = parsed[section.key] ?? [fallbackText];
+      return accumulator;
+    }, {});
+    return formatSummary(normalizedSummary);
   } catch {
     return text;
   }
@@ -255,21 +246,6 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const instructions = normalizeInstructions(formData.get("instructions"));
-
-    const usageCheck = await getServerAccount(usageIdentity);
-
-    if (usageCheck.databaseBacked && remainingSummaries(usageCheck.account) <= 0) {
-      return NextResponse.json(
-        {
-          error: "You have reached your summary limit. Upgrade to JustFlamsit Pro to continue.",
-          usage: usageCheck.account,
-          databaseBacked: true,
-          upgradeRequired: true,
-        },
-        { status: 402 },
-      );
-    }
-
     const files = formData
       .getAll("files")
       .filter((entry): entry is File => entry instanceof File && entry.size > 0);
@@ -293,19 +269,6 @@ export async function POST(request: Request) {
     }
 
     const usage = await consumeServerSummary(usageIdentity);
-
-    if (!usage.allowed) {
-      return NextResponse.json(
-        {
-          error: "You have reached your summary limit. Upgrade to JustFlamsit Pro to continue.",
-          usage: usage.account,
-          databaseBacked: usage.databaseBacked,
-          upgradeRequired: true,
-        },
-        { status: 402 },
-      );
-    }
-
     let summary: string;
 
     try {

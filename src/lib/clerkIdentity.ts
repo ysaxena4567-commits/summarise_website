@@ -63,7 +63,7 @@ export async function requireVerifiedClerkIdentity() {
   if (!identity.emailVerified) {
     return {
       identity: null,
-      error: "Please verify your email address before saving account, payment, or subscription data.",
+      error: "Please verify your email address before saving account usage or history data.",
       status: 403,
     };
   }
