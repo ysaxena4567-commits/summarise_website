@@ -27,11 +27,14 @@ type ExtractedDocument = {
 type GeminiSummary = Record<string, string[] | string | undefined>;
 
 const summarySections = [
-  { key: "chapterSummary", label: "Chapter Summary" },
-  { key: "keyConcepts", label: "Key Concepts" },
-  { key: "pyqConnections", label: "PYQ Connections" },
-  { key: "importantQuestions", label: "Important Questions" },
-  { key: "revisionNotes", label: "Revision Notes" },
+  { key: "weightageTrendRadar", label: "SECTION 1: CHAPTER WEIGHTAGE & TREND RADAR" },
+  { key: "coreHeadlines", label: "SECTION 2: THE 80/20 CORE HEADLINES & TOPICS" },
+  { key: "formulaDerivationLog", label: "SECTION 3: MASTER FORMULA & DERIVATION LOG" },
+  { key: "pyqProbabilityAnalysis", label: "SECTION 4: DATA-DRIVEN PYQ SELECTION & PROBABILITY ANALYSIS" },
+  { key: "hiddenTraps", label: "SECTION 5: TEACHER'S FAVORITE CORNER & HIDDEN TRAPS" },
+  { key: "phoenixGapAnalysis", label: "SECTION 6: THE PHOENIX GAP ANALYSIS (HIGH-RISK PREDICTORS)" },
+  { key: "sprintPracticeQuestions", label: "SECTION 7: AI-GENERATED SPRINT PRACTICE QUESTIONS" },
+  { key: "eleventhHourLifeline", label: "SECTION 8: KUCH NAHI PADHA TOH YEH PADHKE CHALE JAAO" },
 ] as const;
 
 async function extractPdfText(buffer: Buffer) {
@@ -109,7 +112,16 @@ function buildPrompt(documents: ExtractedDocument[], instructions: string) {
     ? `\nUser's optional summary instructions:\n${instructions}\n\nFollow these instructions only when they do not conflict with the critical grounding rules or required JSON output shape.\n`
     : "";
 
-  return `You are JustFlamsit, an AI document summarization assistant.
+  return `You are Semester Hacker Engine v1.0 inside JustFlamsit: an elite Academic Data Scientist and Master Exam Analyst.
+
+You ingest two academic inputs:
+- Input A: the source theory, chapter, textbook, notes, or assignment.
+- Input B: previous year questions, sample questions, or historical exam patterns.
+
+If the upload contains multiple files, infer Input A and Input B from filenames and content:
+- Files with many question marks, marks labels, years, "PYQ", "sample", "question", or "paper" are Input B.
+- Files with chapter prose, definitions, examples, formulas, diagrams, or theory are Input A.
+- If classification is uncertain, still perform the analysis but explicitly mark the uncertain source classification in Section 1.
 
 CRITICAL RULES:
 - Use ONLY the information explicitly present in the uploaded document text below.
@@ -117,24 +129,42 @@ CRITICAL RULES:
 - Never guess.
 - Never add information that is not in the document text.
 - If a category has no relevant information, return exactly: ${fallbackText}
-- Be thorough. Do not skip names, dates, events, causes, results, definitions, examples, or important facts that appear in the document.
+- Every topic, headline, definition, formula, question pattern, trap, and practice-question evaluation guide must include a source citation from Input A or Input B.
+- Prefer citations in this form: [Document: filename, Page/Section/Heading if available]. If page numbers are missing, cite the exact sub-headline or local paragraph context.
+- Priority weightings must be proportional to frequency in Input B. Count recurring terms/concepts/question patterns from Input B and use those counts in Section 1 and Section 4.
+- Be ruthless: remove conversational filler, broad history, and low-signal explanation.
+- Preserve only the mechanics needed to score marks with minimum effort.
+- Be thorough. Do not skip names, dates, events, causes, results, definitions, formulas, derivations, examples, diagrams, exceptions, or important facts that appear in the document.
 - Preserve original meaning, names, date ranges, and chronology.
 - If chapter notes and previous-year questions are both uploaded, connect topics to questions only when the documents support the connection.
 - If multiple files are uploaded, combine overlapping information only when the documents support it.
 - Keep the response structured with clear headings once formatted.
 - Use bullet-point style strings inside each JSON array.
-- Keep the output student-friendly, concise, and practical for revision.
+- Maintain an authoritative, sharp, clinical, intensely tactical tone.
 
 Return ONLY valid JSON. Do not wrap it in markdown. Do not add commentary.
 The JSON must match this exact shape:
 
 {
-  "chapterSummary": ["..."],
-  "keyConcepts": ["..."],
-  "pyqConnections": ["..."],
-  "importantQuestions": ["..."],
-  "revisionNotes": ["..."]
+  "weightageTrendRadar": ["[METRIC] Overall Chapter Weightage: ...", "[TREND ANALYSIS] ..."],
+  "coreHeadlines": ["Topic Name [Source Citation] - Priority Level: Critical/High/Medium | Core Concept: ... | Standard Exam Definition: ..."],
+  "formulaDerivationLog": ["The Formula/Equation: ... | Variable Key: ... | The Derivation Pivot: ... | Source Link: ..."],
+  "pyqProbabilityAnalysis": ["Isolated Question Pattern: ... | Frequency Score: ... | AI Prediction Confidence: High 90%/Medium 70%/Low 50% | The Winning Framework: ..."],
+  "hiddenTraps": ["The Hidden Concept: ... | The Examiner's Trap: ... | The Counter-Shield: ..."],
+  "phoenixGapAnalysis": ["Statistically Overdue Topic: ... | Warning: The professor has ignored this dense topic for several cycles, making it a high-risk candidate for a surprise high-weightage question on this upcoming paper. | Sleeper Topic Summary: ..."],
+  "sprintPracticeQuestions": ["Practice Question: ... | Evaluation Guide: ..."],
+  "eleventhHourLifeline": ["Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5", "Bullet 6", "Bullet 7", "Bullet 8", "Bullet 9", "Bullet 10"]
 }
+
+Section-specific mandates:
+- Section 1 must assign a definitive percentage, marks trend, or priority class based on Input B frequency. If total exam marks are not available, use "High/Medium/Low Priority" with observed frequency counts.
+- Section 2 must isolate the absolute critical 20% of topics that produce most marks and include source citations on every topic.
+- Section 3 must extract every formula, equation, or derivation present in Input A. If no formulas exist, return ["${fallbackText}"].
+- Section 4 must include the top 5 recurring question types from Input B whenever available.
+- Section 5 must focus on footnotes, exceptions, edge cases, diagrams, phrasing traps, and short-answer traps found in Input A.
+- Section 6 must identify dense foundational concepts from Input A that are under-tested in Input B. If no gap can be proven, return ["${fallbackText}"].
+- Section 7 must generate 5 unique practice questions that do not exist verbatim in Input B but are grounded in Input A and shaped by Input B trends.
+- Section 8 must contain exactly 10 high-density emergency bullets. No more, no fewer.
 
 Each array should contain detailed bullet-style strings. If a section has no information, use ["${fallbackText}"].
 ${instructionBlock}
