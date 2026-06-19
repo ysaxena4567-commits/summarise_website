@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 
 const GEMINI_MODEL = "gemini-2.5-flash-lite";
 const MAX_FILES = 5;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_REQUEST_BYTES = MAX_FILES * MAX_FILE_BYTES + 256_000;
 const MAX_TEXT_CHARS = 240_000;
 const MAX_INSTRUCTION_CHARS = 1_000;
@@ -58,15 +58,16 @@ async function extractPdfText(buffer: Buffer) {
 
 async function extractDocumentText(file: File): Promise<ExtractedDocument> {
   if (file.size > MAX_FILE_BYTES) {
-    throw new Error(`${file.name} is larger than the 10MB limit.`);
+    console.log(`File rejected due to file exceeds 50MB limit. name="${file.name}", size=${file.size}`);
+    throw new Error(`${file.name} is larger than the 50MB limit.`);
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const fileName = file.name || "uploaded-document";
   const lowerName = fileName.toLowerCase();
-  const mimeType = file.type;
+  const mimeType = file.type.toLowerCase();
 
-  if (lowerName.endsWith(".pdf") || mimeType === "application/pdf") {
+  if (mimeType === "application/pdf" || lowerName.endsWith(".pdf")) {
     return {
       name: fileName,
       text: await extractPdfText(buffer),
@@ -91,6 +92,9 @@ async function extractDocumentText(file: File): Promise<ExtractedDocument> {
     };
   }
 
+  console.log(
+    `File rejected due to unsupported file type. name="${fileName}", mime="${mimeType || "missing"}"`,
+  );
   throw new Error(`${file.name} is not supported. Upload PDF, DOCX, or TXT files.`);
 }
 
@@ -271,7 +275,7 @@ export async function POST(request: Request) {
     const contentLength = Number(request.headers.get("content-length") || 0);
 
     if (contentLength > MAX_REQUEST_BYTES) {
-      return NextResponse.json({ error: "Upload up to 5 files with a 10MB limit per file." }, { status: 413 });
+      return NextResponse.json({ error: "Upload up to 5 files with a 50MB limit per file." }, { status: 413 });
     }
 
     const formData = await request.formData();

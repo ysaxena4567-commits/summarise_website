@@ -86,6 +86,40 @@ type SummarizeResponse = {
   databaseBacked?: boolean;
 };
 
+const MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
+const supportedUploadExtensions = new Set(["pdf", "docx", "txt"]);
+const supportedUploadMimeTypes = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+]);
+
+function validateUploadFile(file: File) {
+  const rawName = file.name || "";
+  const extension = rawName.includes(".") ? rawName.split(".").pop()?.toLowerCase() || "" : "";
+  const mimeType = file.type.toLowerCase();
+  const hasSupportedExtension = supportedUploadExtensions.has(extension);
+  const hasSupportedMimeType = supportedUploadMimeTypes.has(mimeType);
+  const isPdf = extension === "pdf" || mimeType === "application/pdf";
+  const isSupported = isPdf || hasSupportedExtension || hasSupportedMimeType;
+
+  if (!isSupported) {
+    return {
+      accepted: false,
+      reason: `unsupported file type. name="${rawName}", extension="${extension || "missing"}", mime="${mimeType || "missing"}"`,
+    };
+  }
+
+  if (file.size > MAX_UPLOAD_FILE_BYTES) {
+    return {
+      accepted: false,
+      reason: `file exceeds 50MB limit. name="${rawName}", size=${file.size}`,
+    };
+  }
+
+  return { accepted: true, reason: "" };
+}
+
 function Logo() {
   return (
     <a href="#top" className="flex items-center gap-3" aria-label="JustFlamsit home">
@@ -272,13 +306,23 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
   }, [authUser?.emailVerified, authUser?.userId]);
 
   const addSupportedFiles = useCallback((nextFiles: File[]) => {
-    const supportedFiles = nextFiles.filter((file) => /\.(pdf|docx|txt)$/i.test(file.name));
+    const rejectedFiles: string[] = [];
+    const supportedFiles = nextFiles.filter((file) => {
+      const validation = validateUploadFile(file);
 
-    if (supportedFiles.length !== nextFiles.length) {
-      setError("Only PDF, DOCX, and TXT files are supported.");
-    } else {
-      setError("");
-    }
+      if (!validation.accepted) {
+        console.log(`File rejected due to ${validation.reason}`);
+        rejectedFiles.push(`${file.name || "Unnamed file"}: ${validation.reason}`);
+      }
+
+      return validation.accepted;
+    });
+
+    setError(
+      rejectedFiles.length
+        ? `Some files were rejected. ${rejectedFiles[0]}`
+        : "",
+    );
 
     setUploadedFiles((current) => {
       const existing = new Set(current.map((item) => `${item.file.name}-${item.file.size}`));
@@ -437,7 +481,7 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
                 <FileUp size={26} />
               </span>
               <span className="mt-5 text-xl font-semibold text-white">Drag and drop files here</span>
-              <span className="mt-2 max-w-md text-sm leading-6 text-zinc-400">Upload up to 5 chapter, PYQ, or notes files. Supported formats: PDF, DOCX, and TXT.</span>
+              <span className="mt-2 max-w-md text-sm leading-6 text-zinc-400">Upload up to 5 chapter, PYQ, or notes files. Supported formats: PDF, DOCX, and TXT. Max 50MB each.</span>
               <span className="mt-5 rounded-lg border border-white/10 px-4 py-2 text-sm font-semibold text-white">Browse files</span>
               <input
                 id="document-upload"
