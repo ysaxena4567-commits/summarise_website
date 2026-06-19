@@ -120,6 +120,29 @@ function validateUploadFile(file: File) {
   return { accepted: true, reason: "" };
 }
 
+function safeTransportFileName(file: File) {
+  const rawName = file.name || "uploaded-document";
+  const extension = rawName.includes(".") ? rawName.split(".").pop()?.toLowerCase() || "" : "";
+  const fallbackExtension =
+    file.type.toLowerCase() === "application/pdf"
+      ? "pdf"
+      : file.type.toLowerCase() === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ? "docx"
+        : file.type.toLowerCase() === "text/plain"
+          ? "txt"
+          : "dat";
+  const finalExtension = supportedUploadExtensions.has(extension) ? extension : fallbackExtension;
+  const baseName = rawName
+    .replace(/\.[^.]+$/, "")
+    .normalize("NFKD")
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "uploaded-document";
+
+  return `${baseName}.${finalExtension}`;
+}
+
 function Logo() {
   return (
     <a href="#top" className="flex items-center gap-3" aria-label="JustFlamsit home">
@@ -386,14 +409,37 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
 
     try {
       const formData = new FormData();
-      uploadedFiles.forEach(({ file }) => formData.append("files", file));
+      uploadedFiles.forEach(({ file }) => {
+        const transportName = safeTransportFileName(file);
+        console.log(`Preparing upload file "${file.name}" as "${transportName}" (${file.type || "missing mime"}, ${file.size} bytes)`);
+        formData.append("files", file, transportName);
+      });
       formData.append("instructions", instructions.trim());
 
-      const response = await fetch("/api/summarize", {
-        method: "POST",
-        body: formData,
-      });
-      const data = (await response.json()) as SummarizeResponse;
+      let response: Response;
+
+      try {
+        response = await fetch("/api/summarize", {
+          method: "POST",
+          body: formData,
+        });
+      } catch (fetchError) {
+        console.log("File rejected due to upload request failure", fetchError);
+        throw fetchError;
+      }
+
+      const responseText = await response.text();
+      let data: SummarizeResponse;
+
+      try {
+        data = responseText ? (JSON.parse(responseText) as SummarizeResponse) : {};
+      } catch {
+        console.log("File rejected due to non-JSON upload response", {
+          status: response.status,
+          responseText,
+        });
+        data = { error: responseText || "Upload failed before the server returned JSON." };
+      }
 
       if (!response.ok || !data.summary) {
         if (response.status === 401) requireClerkSignIn();
@@ -408,7 +454,9 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
         setUsage(recordSuccessfulSummary(currentUsage));
       }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Something went wrong.");
+      const message = requestError instanceof Error ? requestError.message : "Something went wrong.";
+      console.log(`File rejected due to ${message}`, requestError);
+      setError(message);
     } finally {
       setIsLoading(false);
     }

@@ -68,10 +68,15 @@ async function extractDocumentText(file: File): Promise<ExtractedDocument> {
   const mimeType = file.type.toLowerCase();
 
   if (mimeType === "application/pdf" || lowerName.endsWith(".pdf")) {
-    return {
-      name: fileName,
-      text: await extractPdfText(buffer),
-    };
+    try {
+      return {
+        name: fileName,
+        text: await extractPdfText(buffer),
+      };
+    } catch (error) {
+      console.log(`File rejected due to PDF text extraction failure. name="${fileName}"`, error);
+      throw new Error(`${fileName} could not be read as a PDF. Try re-saving or compressing the PDF and upload again.`);
+    }
   }
 
   if (
