@@ -86,6 +86,13 @@ type SummarizeResponse = {
   databaseBacked?: boolean;
 };
 
+type ExtractedUploadDocument = {
+  name: string;
+  type: string;
+  size: number;
+  text: string;
+};
+
 const MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
 const supportedUploadExtensions = new Set(["pdf", "docx", "txt"]);
 const supportedUploadMimeTypes = new Set([
@@ -141,6 +148,106 @@ function safeTransportFileName(file: File) {
     .slice(0, 80) || "uploaded-document";
 
   return `${baseName}.${finalExtension}`;
+}
+
+function isPdfFile(file: File) {
+  return file.type.toLowerCase() === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function isTextFile(file: File) {
+  return file.type.toLowerCase() === "text/plain" || file.name.toLowerCase().endsWith(".txt");
+}
+
+function isDocxFile(file: File) {
+  return (
+    file.type.toLowerCase() === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    file.name.toLowerCase().endsWith(".docx")
+  );
+}
+
+async function extractPdfTextInBrowser(file: File) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({
+    data: new Uint8Array(arrayBuffer),
+    disableWorker: true,
+    useSystemFonts: true,
+  } as Record<string, unknown>).promise;
+  const pageTexts: string[] = [];
+  const diagramTableSignals: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const textItems = content.items
+      .map((item) => ("str" in item ? item.str : ""))
+      .filter(Boolean);
+    const pageText = textItems.join(" ").replace(/\s+/g, " ").trim();
+
+    if (pageText) {
+      pageTexts.push(`[Page ${pageNumber}] ${pageText}`);
+    }
+
+    const visualSignals = textItems
+      .filter((item) => /\b(fig(?:ure)?|diagram|table|chart|graph|flowchart|cycle|scheme)\b/i.test(item))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (visualSignals) {
+      diagramTableSignals.push(`[Page ${pageNumber}] ${visualSignals}`);
+    }
+  }
+
+  const extractedText = pageTexts.join("\n\n").trim();
+  const visualNote = diagramTableSignals.length
+    ? `\n\n[Detected diagram/table/caption signals]\n${diagramTableSignals.join("\n")}`
+    : "";
+  const warning =
+    extractedText.length < 500
+      ? "\n\n[Extraction warning] This PDF appears to be image-heavy or scanned. Only selectable text and visible captions could be extracted. Do not invent diagram/table details that are not present in extracted text."
+      : "";
+
+  console.log(`Extracted PDF client-side "${file.name}" with ${extractedText.length} characters across ${pdf.numPages} pages.`);
+  await (pdf as unknown as { destroy?: () => Promise<void> | void }).destroy?.();
+  return `${extractedText}${visualNote}${warning}`.trim();
+}
+
+async function extractDocxTextInBrowser(file: File) {
+  const mammoth = await import("mammoth/mammoth.browser");
+  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  return result.value.trim();
+}
+
+async function extractUploadDocument(file: File): Promise<ExtractedUploadDocument> {
+  if (isPdfFile(file)) {
+    return {
+      name: file.name,
+      type: file.type || "application/pdf",
+      size: file.size,
+      text: await extractPdfTextInBrowser(file),
+    };
+  }
+
+  if (isTextFile(file)) {
+    return {
+      name: file.name,
+      type: file.type || "text/plain",
+      size: file.size,
+      text: (await file.text()).trim(),
+    };
+  }
+
+  if (isDocxFile(file)) {
+    return {
+      name: file.name,
+      type: file.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: file.size,
+      text: await extractDocxTextInBrowser(file),
+    };
+  }
+
+  throw new Error(`${file.name} is not supported. Upload PDF, DOCX, or TXT files.`);
 }
 
 function Logo() {
@@ -246,11 +353,6 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatUsageLabel(usage: UsageState) {
-  const total = usage.summaryCount ?? usage.freeUsed ?? 0;
-  return total === 1 ? "1 summary generated" : `${total} summaries generated`;
 }
 
 async function fetchAccountUsage() {
@@ -408,20 +510,23 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
     setCopied(false);
 
     try {
-      const formData = new FormData();
-      uploadedFiles.forEach(({ file }) => {
-        const transportName = safeTransportFileName(file);
-        console.log(`Preparing upload file "${file.name}" as "${transportName}" (${file.type || "missing mime"}, ${file.size} bytes)`);
-        formData.append("files", file, transportName);
-      });
-      formData.append("instructions", instructions.trim());
+      const extractedDocuments = await Promise.all(uploadedFiles.map(({ file }) => extractUploadDocument(file)));
+      const emptyDocument = extractedDocuments.find((document) => !document.text.trim());
+
+      if (emptyDocument) {
+        throw new Error(`${emptyDocument.name} has no selectable text. Use an OCR/scanned-PDF version with selectable text, then upload again.`);
+      }
 
       let response: Response;
 
       try {
         response = await fetch("/api/summarize", {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            documents: extractedDocuments,
+            instructions: instructions.trim(),
+          }),
         });
       } catch (fetchError) {
         console.log("File rejected due to upload request failure", fetchError);
@@ -491,12 +596,8 @@ function SummarizerSection({ authUser }: { authUser: AuthUser | null }) {
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#c5b358]">AI Summarizer</p>
             <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Upload chapter and PYQ files, then generate</h2>
             <p className="mt-3 text-base leading-7 text-zinc-300">PDFs, DOCX, and TXT files are processed only for summary generation.</p>
-            <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[#c5b358]/30 bg-[#c5b358]/10 px-3 py-2 text-sm font-semibold text-[#f2e7a5]">
-              {isUsageSyncing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-              {isUsageSyncing ? "Syncing Clerk usage..." : formatUsageLabel(usage)}
-            </div>
-            <p className="mt-2 text-xs leading-5 text-zinc-500">
-              {databaseBacked ? "Usage is synced to your verified Clerk email." : "Verified Clerk email is required for account usage sync."}
+            <p className="mt-4 text-sm leading-6 text-zinc-400">
+              Sign in with a verified Clerk email to generate and save summary history metadata.
             </p>
           </div>
         </div>

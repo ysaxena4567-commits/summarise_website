@@ -26,6 +26,13 @@ type ExtractedDocument = {
 
 type GeminiSummary = Record<string, string[] | string | undefined>;
 
+type UploadedDocumentInput = {
+  name?: string;
+  text?: string;
+  type?: string;
+  size?: number;
+};
+
 const summarySections = [
   { key: "weightageTrendRadar", label: "SECTION 1: CHAPTER WEIGHTAGE & TREND RADAR" },
   { key: "coreHeadlines", label: "SECTION 2: THE 80/20 CORE HEADLINES & TOPICS" },
@@ -109,6 +116,27 @@ function normalizeInstructions(value: FormDataEntryValue | null) {
   return value.replace(/\s+/g, " ").trim().slice(0, MAX_INSTRUCTION_CHARS);
 }
 
+function normalizeJsonInstructions(value: unknown) {
+  if (typeof value !== "string") return "";
+
+  return value.replace(/\s+/g, " ").trim().slice(0, MAX_INSTRUCTION_CHARS);
+}
+
+function normalizeUploadedDocument(document: UploadedDocumentInput, index: number): ExtractedDocument {
+  const name = document.name?.trim() || `uploaded-document-${index + 1}`;
+  const text = document.text?.trim() || "";
+
+  if (!text) {
+    console.log(`File rejected due to no extracted text. name="${name}", type="${document.type || "missing"}", size=${document.size ?? 0}`);
+    throw new Error(`${name} has no selectable text. Use an OCR/scanned-PDF version with selectable text, then upload again.`);
+  }
+
+  return {
+    name,
+    text,
+  };
+}
+
 function buildPrompt(documents: ExtractedDocument[], instructions: string) {
   const sourceText = documents
     .map((document, index) => {
@@ -141,6 +169,8 @@ CRITICAL RULES:
 - Every topic, headline, definition, formula, question pattern, trap, and practice-question evaluation guide must include a source citation from Input A or Input B.
 - Prefer citations in this form: [Document: filename, Page/Section/Heading if available]. If page numbers are missing, cite the exact sub-headline or local paragraph context.
 - Priority weightings must be proportional to frequency in Input B. Count recurring terms/concepts/question patterns from Input B and use those counts in Section 1 and Section 4.
+- Treat diagrams, tables, flowcharts, cycles, figures, graph labels, and captions as high-value exam material. Extract them when the uploaded text contains captions, labels, table rows, or figure references.
+- If a PDF is scanned/image-heavy and only sparse captions are extracted, state that limitation exactly. Do not invent unseen visual content.
 - Be ruthless: remove conversational filler, broad history, and low-signal explanation.
 - Preserve only the mechanics needed to score marks with minimum effort.
 - Be thorough. Do not skip names, dates, events, causes, results, definitions, formulas, derivations, examples, diagrams, exceptions, or important facts that appear in the document.
@@ -168,12 +198,13 @@ The JSON must match this exact shape:
 Section-specific mandates:
 - Section 1 must assign a definitive percentage, marks trend, or priority class based on Input B frequency. If total exam marks are not available, use "High/Medium/Low Priority" with observed frequency counts.
 - Section 2 must isolate the absolute critical 20% of topics that produce most marks and include source citations on every topic.
-- Section 3 must extract every formula, equation, or derivation present in Input A. If no formulas exist, return ["${fallbackText}"].
+- Section 2 must include exam-critical diagrams/tables as core topics when Input A or Input B indicates they are important.
+- Section 3 must extract every formula, equation, chemical equation, table logic, labelled process sequence, or derivation present in Input A. If no formulas exist, return ["${fallbackText}"].
 - Section 4 must include the top 5 recurring question types from Input B whenever available.
-- Section 5 must focus on footnotes, exceptions, edge cases, diagrams, phrasing traps, and short-answer traps found in Input A.
+- Section 5 must focus on footnotes, exceptions, edge cases, diagrams, table traps, labelled-process traps, phrasing traps, and short-answer traps found in Input A.
 - Section 6 must identify dense foundational concepts from Input A that are under-tested in Input B. If no gap can be proven, return ["${fallbackText}"].
 - Section 7 must generate 5 unique practice questions that do not exist verbatim in Input B but are grounded in Input A and shaped by Input B trends.
-- Section 8 must contain exactly 10 high-density emergency bullets. No more, no fewer.
+- Section 8 must contain exactly 10 high-density emergency bullets. No more, no fewer. Include a diagram/table bullet only if the source text supports it.
 
 Each array should contain detailed bullet-style strings. If a section has no information, use ["${fallbackText}"].
 ${instructionBlock}
@@ -283,21 +314,46 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Upload up to 5 files with a 50MB limit per file." }, { status: 413 });
     }
 
-    const formData = await request.formData();
-    const instructions = normalizeInstructions(formData.get("instructions"));
-    const files = formData
-      .getAll("files")
-      .filter((entry): entry is File => entry instanceof File && entry.size > 0);
+    const contentType = request.headers.get("content-type") || "";
+    let instructions = "";
+    let documents: ExtractedDocument[];
 
-    if (!files.length) {
-      return NextResponse.json({ error: "Upload at least one PDF, DOCX, or TXT file." }, { status: 400 });
+    if (contentType.includes("application/json")) {
+      const body = (await request.json().catch(() => ({}))) as {
+        documents?: UploadedDocumentInput[];
+        instructions?: unknown;
+      };
+
+      instructions = normalizeJsonInstructions(body.instructions);
+      const uploadedDocuments = Array.isArray(body.documents) ? body.documents : [];
+
+      if (!uploadedDocuments.length) {
+        return NextResponse.json({ error: "Upload at least one PDF, DOCX, or TXT file." }, { status: 400 });
+      }
+
+      if (uploadedDocuments.length > MAX_FILES) {
+        return NextResponse.json({ error: `Upload ${MAX_FILES} files or fewer.` }, { status: 400 });
+      }
+
+      documents = uploadedDocuments.map(normalizeUploadedDocument);
+    } else {
+      const formData = await request.formData();
+      instructions = normalizeInstructions(formData.get("instructions"));
+      const files = formData
+        .getAll("files")
+        .filter((entry): entry is File => entry instanceof File && entry.size > 0);
+
+      if (!files.length) {
+        return NextResponse.json({ error: "Upload at least one PDF, DOCX, or TXT file." }, { status: 400 });
+      }
+
+      if (files.length > MAX_FILES) {
+        return NextResponse.json({ error: `Upload ${MAX_FILES} files or fewer.` }, { status: 400 });
+      }
+
+      documents = await Promise.all(files.map(extractDocumentText));
     }
 
-    if (files.length > MAX_FILES) {
-      return NextResponse.json({ error: `Upload ${MAX_FILES} files or fewer.` }, { status: 400 });
-    }
-
-    const documents = await Promise.all(files.map(extractDocumentText));
     const availableDocuments = documents.filter((document) => document.text.trim().length > 0);
 
     if (!availableDocuments.length) {
