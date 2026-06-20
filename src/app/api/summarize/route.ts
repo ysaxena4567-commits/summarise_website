@@ -24,7 +24,7 @@ type ExtractedDocument = {
   text: string;
 };
 
-type GeminiSummary = Record<string, string[] | string | undefined>;
+type GeminiSummary = Record<string, unknown>;
 
 type UploadedDocumentInput = {
   name?: string;
@@ -193,7 +193,7 @@ The JSON must match this exact shape:
   "weightageTrendRadar": ["Overall chapter priority: ...", "Trend analysis: ..."],
   "coreHeadlines": ["🎯 Topic Name - Priority Level: Critical/High/Medium | Core Concept: ... | Standard Exam Definition: ..."],
   "multimodalExtractionMatrix": "### 🧩 Target Entity Name\\n* 🎯 **Core Measurement / Text Data:** ...\\n* 🧠 **Visual / Diagram Calculation:** ...\\n* 🚨 **Examiner's Trap:** ...\\n\\n> **💡 The Winning Move:** ...\\n---",
-  "pyqProbabilityAnalysis": ["Isolated Question Pattern: ... | Frequency Score: ... | AI Prediction Confidence: High 90%/Medium 70%/Low 50% | The Winning Framework: ..."],
+  "pyqProbabilityAnalysis": ["🎯 **High-Importance Question from Uploaded PYQ:** [Copy the question exactly as it appears in Input B] | Why it matters: ... | Frequency Score: ... | Prediction Confidence: ... | Winning Framework: ..."],
   "hiddenTraps": ["The Hidden Concept: ... | The Examiner's Trap: ... | The Counter-Shield: ..."],
   "phoenixGapAnalysis": ["Statistically Overdue Topic: ... | Warning: The professor has ignored this dense topic for several cycles, making it a high-risk candidate for a surprise high-weightage question on this upcoming paper. | Sleeper Topic Summary: ..."],
   "sprintPracticeQuestions": ["Practice Question: ... | Evaluation Guide: ..."],
@@ -219,12 +219,14 @@ Section-specific mandates:
 - For a scanned or image-only PDF with no extracted visual labels, do not claim to inspect a diagram. Use "Text-derived concept only." and make the limitation clear in the trap or winning-move line.
 - If no qualifying data exists, return one complete Premium List Card whose text-data line says "${fallbackText}".
 - Section 4 must include the top 5 recurring question types from Input B whenever available.
+- When Input B is present, Section 4 must first select the highest-importance questions from the uploaded PYQ/sample-paper text itself. Preserve each selected question's wording exactly; do not rewrite, merge, or invent an uploaded question. Rank it using recurrence, marks cues, coverage of core chapter concepts, and explicit emphasis in Input B.
+- Section 4 must make the source distinction obvious: each selected uploaded question begins with "🎯 **High-Importance Question from Uploaded PYQ:**". Include why it matters, its observed frequency, a confidence level, and a concise answer framework.
 - Section 5 must focus on footnotes, exceptions, edge cases, diagrams, table traps, labelled-process traps, phrasing traps, and short-answer traps found in Input A.
 - Section 6 must identify dense foundational concepts from Input A that are under-tested in Input B. If no gap can be proven, return ["${fallbackText}"].
-- Section 7 must generate 5 unique practice questions that do not exist verbatim in Input B but are grounded in Input A and shaped by Input B trends.
+- Section 7 must generate exactly 5 unique teacher/professor-style practice questions. They must be academically rigorous, grounded in Input A, and model the wording, difficulty, marks pattern, and topic trends of Input B without copying any Input B question verbatim. Include a concise evaluation guide for each.
 - Section 8 must contain exactly 10 high-density emergency bullets. No more, no fewer. Include a diagram/table bullet only if the source text supports it.
 
-Each array should contain detailed bullet-style strings. If a section has no information, use ["${fallbackText}"].
+Every JSON array value must contain plain strings only. Never return JSON objects, nested arrays, key-value objects, or null values inside any section. If a section has no information, use ["${fallbackText}"].
 ${instructionBlock}
 
 Uploaded document text:
@@ -232,14 +234,41 @@ Uploaded document text:
 ${sourceText}`;
 }
 
-function normalizeSection(value: string[] | string | undefined) {
+function displayJsonValue(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value).trim();
+  }
+
   if (Array.isArray(value)) {
-    const items = value.map((item) => String(item).trim()).filter(Boolean);
+    return value
+      .map(displayJsonValue)
+      .filter(Boolean)
+      .join(" | ");
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => {
+        const content = displayJsonValue(item);
+        const label = key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim();
+        return content ? `${label}: ${content}` : "";
+      })
+      .filter(Boolean)
+      .join(" | ");
+  }
+
+  return "";
+}
+
+function normalizeSection(value: unknown) {
+  if (Array.isArray(value)) {
+    const items = value.map(displayJsonValue).filter(Boolean);
     return items.length ? items : [fallbackText];
   }
 
-  if (typeof value === "string" && value.trim()) {
-    return [value.trim()];
+  const item = displayJsonValue(value);
+  if (item) {
+    return [item];
   }
 
   return [fallbackText];
@@ -260,7 +289,7 @@ function formatSummary(summary: GeminiSummary) {
       const format = "format" in section ? section.format : undefined;
 
       if (format === "premium-cards") {
-        const cards = typeof summary[key] === "string" ? summary[key].trim() : "";
+        const cards = displayJsonValue(summary[key]);
         const fallbackCards = [
           "### \uD83E\uDDE9 Key scientific data",
           `* \uD83C\uDFAF **Core Measurement / Text Data:** ${fallbackText}`,
