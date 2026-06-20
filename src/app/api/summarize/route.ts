@@ -36,7 +36,11 @@ type UploadedDocumentInput = {
 const summarySections = [
   { key: "weightageTrendRadar", label: "SECTION 1: CHAPTER WEIGHTAGE & TREND RADAR" },
   { key: "coreHeadlines", label: "SECTION 2: THE 80/20 CORE HEADLINES & TOPICS" },
-  { key: "formulaDerivationLog", label: "SECTION 3: MASTER FORMULA & DERIVATION LOG" },
+  {
+    key: "multimodalExtractionMatrix",
+    label: "SECTION 3: THE MULTIMODAL EXTRACTION & CALCULATION MATRIX",
+    format: "markdown-table",
+  },
   { key: "pyqProbabilityAnalysis", label: "SECTION 4: DATA-DRIVEN PYQ SELECTION & PROBABILITY ANALYSIS" },
   { key: "hiddenTraps", label: "SECTION 5: TEACHER'S FAVORITE CORNER & HIDDEN TRAPS" },
   { key: "phoenixGapAnalysis", label: "SECTION 6: THE PHOENIX GAP ANALYSIS (HIGH-RISK PREDICTORS)" },
@@ -187,7 +191,7 @@ The JSON must match this exact shape:
 {
   "weightageTrendRadar": ["[METRIC] Overall Chapter Weightage: ...", "[TREND ANALYSIS] ..."],
   "coreHeadlines": ["Topic Name [Source Citation] - Priority Level: Critical/High/Medium | Core Concept: ... | Standard Exam Definition: ..."],
-  "formulaDerivationLog": ["The Formula/Equation: ... | Variable Key: ... | The Derivation Pivot: ... | Source Link: ..."],
+  "multimodalExtractionMatrix": "| Target Entity / Variable | Text-Derived Measurement / Composition | Diagram-Derived Data & Calculations | High-Yield Exam Context |\\n| :--- | :--- | :--- | :--- |\\n| ... | ... | ... | ... |",
   "pyqProbabilityAnalysis": ["Isolated Question Pattern: ... | Frequency Score: ... | AI Prediction Confidence: High 90%/Medium 70%/Low 50% | The Winning Framework: ..."],
   "hiddenTraps": ["The Hidden Concept: ... | The Examiner's Trap: ... | The Counter-Shield: ..."],
   "phoenixGapAnalysis": ["Statistically Overdue Topic: ... | Warning: The professor has ignored this dense topic for several cycles, making it a high-risk candidate for a surprise high-weightage question on this upcoming paper. | Sleeper Topic Summary: ..."],
@@ -199,7 +203,15 @@ Section-specific mandates:
 - Section 1 must assign a definitive percentage, marks trend, or priority class based on Input B frequency. If total exam marks are not available, use "High/Medium/Low Priority" with observed frequency counts.
 - Section 2 must isolate the absolute critical 20% of topics that produce most marks and include source citations on every topic.
 - Section 2 must include exam-critical diagrams/tables as core topics when Input A or Input B indicates they are important.
-- Section 3 must extract every formula, equation, chemical equation, table logic, labelled process sequence, or derivation present in Input A. If no formulas exist, return ["${fallbackText}"].
+- Section 3 is exclusively the Multimodal Extraction & Calculation Matrix. Return it as one valid Markdown table string, never as a bullet list and never as prose outside the table.
+- Section 3 must use this exact four-column header and divider row:
+  | Target Entity / Variable | Text-Derived Measurement / Composition | Diagram-Derived Data & Calculations | High-Yield Exam Context |
+  | :--- | :--- | :--- | :--- |
+- In Section 3, extract every explicit numerical measurement, range, scale, dimension, variable, formula, chemical composition, equation, unit, concentration, temperature, pH, volume, rate, yield, labelled process sequence, table value, and derivation fact present in Input A.
+- Preserve values and scientific units exactly as written. Do not round, convert, or infer values unless the calculation is mathematically deducible from values, scales, axes, labels, or annotations present in the uploaded text.
+- For each row, Column 3 must contain diagram/table/graph data only when captions, labels, figure references, table rows, graph axes, scale values, or annotations are explicitly present in the uploaded text. Otherwise write exactly: N/A - Text Only.
+- For a scanned or image-only PDF with no extracted visual labels, do not claim to inspect a diagram. Use N/A - Text Only and state the source limitation in the relevant exam-context cell.
+- Every row must include a source citation in either Column 2, Column 3, or Column 4. If no qualifying data exists, return the required table header plus one row whose measurement cells say "${fallbackText}".
 - Section 4 must include the top 5 recurring question types from Input B whenever available.
 - Section 5 must focus on footnotes, exceptions, edge cases, diagrams, table traps, labelled-process traps, phrasing traps, and short-answer traps found in Input A.
 - Section 6 must identify dense foundational concepts from Input A that are under-tested in Input B. If no gap can be proven, return ["${fallbackText}"].
@@ -237,7 +249,21 @@ function cleanJsonText(text: string) {
 
 function formatSummary(summary: GeminiSummary) {
   return summarySections
-    .map(({ key, label }) => {
+    .map((section) => {
+      const { key, label } = section;
+      const format = "format" in section ? section.format : undefined;
+
+      if (format === "markdown-table") {
+        const matrix = typeof summary[key] === "string" ? summary[key].trim() : "";
+        const fallbackMatrix = [
+          "| Target Entity / Variable | Text-Derived Measurement / Composition | Diagram-Derived Data & Calculations | High-Yield Exam Context |",
+          "| :--- | :--- | :--- | :--- |",
+          `| ${fallbackText} | ${fallbackText} | N/A - Text Only | ${fallbackText} |`,
+        ].join("\n");
+
+        return `## ${label}\n${matrix.startsWith("|") ? matrix : fallbackMatrix}`;
+      }
+
       const items = normalizeSection(summary[key]);
       const body = items.map((item) => `- ${item.replace(/\s+/g, " ").trim()}`).join("\n");
       return `## ${label}\n${body}`;
