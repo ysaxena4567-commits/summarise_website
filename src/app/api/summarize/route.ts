@@ -39,7 +39,7 @@ const summarySections = [
   {
     key: "multimodalExtractionMatrix",
     label: "SECTION 3: THE MULTIMODAL EXTRACTION & CALCULATION MATRIX",
-    format: "markdown-table",
+    format: "premium-cards",
   },
   { key: "pyqProbabilityAnalysis", label: "SECTION 4: DATA-DRIVEN PYQ SELECTION & PROBABILITY ANALYSIS" },
   { key: "hiddenTraps", label: "SECTION 5: TEACHER'S FAVORITE CORNER & HIDDEN TRAPS" },
@@ -170,8 +170,7 @@ CRITICAL RULES:
 - Never guess.
 - Never add information that is not in the document text.
 - If a category has no relevant information, return exactly: ${fallbackText}
-- Every topic, headline, definition, formula, question pattern, trap, and practice-question evaluation guide must include a source citation from Input A or Input B.
-- Prefer citations in this form: [Document: filename, Page/Section/Heading if available]. If page numbers are missing, cite the exact sub-headline or local paragraph context.
+- Ground every claim in Input A or Input B, but never show raw source tags such as [METRIC], [Input A], or [Document Page X]. Weave a source heading naturally into a sentence only when it makes the finding clearer.
 - Priority weightings must be proportional to frequency in Input B. Count recurring terms/concepts/question patterns from Input B and use those counts in Section 1 and Section 4.
 - Treat diagrams, tables, flowcharts, cycles, figures, graph labels, and captions as high-value exam material. Extract them when the uploaded text contains captions, labels, table rows, or figure references.
 - If a PDF is scanned/image-heavy and only sparse captions are extracted, state that limitation exactly. Do not invent unseen visual content.
@@ -181,17 +180,19 @@ CRITICAL RULES:
 - Preserve original meaning, names, date ranges, and chronology.
 - If chapter notes and previous-year questions are both uploaded, connect topics to questions only when the documents support the connection.
 - If multiple files are uploaded, combine overlapping information only when the documents support it.
-- Keep the response structured with clear headings once formatted.
+- Keep the response structured with clear headings once formatted. Use short bullets, double line breaks between distinct ideas, and blockquotes for the most important takeaway in a section.
 - Use bullet-point style strings inside each JSON array.
-- Maintain an authoritative, sharp, clinical, intensely tactical tone.
+- Use emojis only as visual anchors: 🎯 for core data, 🧠 for analysed/calculated data, 🚨 for risk, and 💡 for the winning move.
+- Bold only the exact keywords, scientific names, formulas, and numerical values an examiner needs to see.
+- Maintain an authoritative, sharp, clinical, intensely tactical, protective tone.
 
 Return ONLY valid JSON. Do not wrap it in markdown. Do not add commentary.
 The JSON must match this exact shape:
 
 {
-  "weightageTrendRadar": ["[METRIC] Overall Chapter Weightage: ...", "[TREND ANALYSIS] ..."],
-  "coreHeadlines": ["Topic Name [Source Citation] - Priority Level: Critical/High/Medium | Core Concept: ... | Standard Exam Definition: ..."],
-  "multimodalExtractionMatrix": "| Target Entity / Variable | Text-Derived Measurement / Composition | Diagram-Derived Data & Calculations | High-Yield Exam Context |\\n| :--- | :--- | :--- | :--- |\\n| ... | ... | ... | ... |",
+  "weightageTrendRadar": ["Overall chapter priority: ...", "Trend analysis: ..."],
+  "coreHeadlines": ["🎯 Topic Name - Priority Level: Critical/High/Medium | Core Concept: ... | Standard Exam Definition: ..."],
+  "multimodalExtractionMatrix": "### 🧩 Target Entity Name\\n* 🎯 **Core Measurement / Text Data:** ...\\n* 🧠 **Visual / Diagram Calculation:** ...\\n* 🚨 **Examiner's Trap:** ...\\n\\n> **💡 The Winning Move:** ...\\n---",
   "pyqProbabilityAnalysis": ["Isolated Question Pattern: ... | Frequency Score: ... | AI Prediction Confidence: High 90%/Medium 70%/Low 50% | The Winning Framework: ..."],
   "hiddenTraps": ["The Hidden Concept: ... | The Examiner's Trap: ... | The Counter-Shield: ..."],
   "phoenixGapAnalysis": ["Statistically Overdue Topic: ... | Warning: The professor has ignored this dense topic for several cycles, making it a high-risk candidate for a surprise high-weightage question on this upcoming paper. | Sleeper Topic Summary: ..."],
@@ -201,17 +202,22 @@ The JSON must match this exact shape:
 
 Section-specific mandates:
 - Section 1 must assign a definitive percentage, marks trend, or priority class based on Input B frequency. If total exam marks are not available, use "High/Medium/Low Priority" with observed frequency counts.
-- Section 2 must isolate the absolute critical 20% of topics that produce most marks and include source citations on every topic.
+- Section 2 must isolate the absolute critical 20% of topics that produce most marks and ground every topic in the uploaded material.
 - Section 2 must include exam-critical diagrams/tables as core topics when Input A or Input B indicates they are important.
-- Section 3 is exclusively the Multimodal Extraction & Calculation Matrix. Return it as one valid Markdown table string, never as a bullet list and never as prose outside the table.
-- Section 3 must use this exact four-column header and divider row:
-  | Target Entity / Variable | Text-Derived Measurement / Composition | Diagram-Derived Data & Calculations | High-Yield Exam Context |
-  | :--- | :--- | :--- | :--- |
+- Section 3 is exclusively the Multimodal Extraction & Calculation Matrix. Return it as one Markdown string made of vertical Premium List Cards. Never use a Markdown table, pipes, or table divider rows.
+- Every Section 3 entity must follow this exact card structure:
+  ### 🧩 [Target Entity Name]
+  * 🎯 **Core Measurement / Text Data:** [Exact value, unit, composition, formula, range, or process fact]
+  * 🧠 **Visual / Diagram Calculation:** [Diagram/graph/table value or calculation; otherwise write exactly: Text-derived concept only.]
+  * 🚨 **Examiner's Trap:** [The precise confusion, exception, unit error, or wording trap supported by the source]
+
+  > **💡 The Winning Move:** [One tactical sentence that explains how to secure full marks.]
+  ---
 - In Section 3, extract every explicit numerical measurement, range, scale, dimension, variable, formula, chemical composition, equation, unit, concentration, temperature, pH, volume, rate, yield, labelled process sequence, table value, and derivation fact present in Input A.
 - Preserve values and scientific units exactly as written. Do not round, convert, or infer values unless the calculation is mathematically deducible from values, scales, axes, labels, or annotations present in the uploaded text.
-- For each row, Column 3 must contain diagram/table/graph data only when captions, labels, figure references, table rows, graph axes, scale values, or annotations are explicitly present in the uploaded text. Otherwise write exactly: N/A - Text Only.
-- For a scanned or image-only PDF with no extracted visual labels, do not claim to inspect a diagram. Use N/A - Text Only and state the source limitation in the relevant exam-context cell.
-- Every row must include a source citation in either Column 2, Column 3, or Column 4. If no qualifying data exists, return the required table header plus one row whose measurement cells say "${fallbackText}".
+- For each card, use visual/diagram data only when captions, labels, figure references, table rows, graph axes, scale values, or annotations are explicitly present in the uploaded text. Otherwise write exactly: Text-derived concept only.
+- For a scanned or image-only PDF with no extracted visual labels, do not claim to inspect a diagram. Use "Text-derived concept only." and make the limitation clear in the trap or winning-move line.
+- If no qualifying data exists, return one complete Premium List Card whose text-data line says "${fallbackText}".
 - Section 4 must include the top 5 recurring question types from Input B whenever available.
 - Section 5 must focus on footnotes, exceptions, edge cases, diagrams, table traps, labelled-process traps, phrasing traps, and short-answer traps found in Input A.
 - Section 6 must identify dense foundational concepts from Input A that are under-tested in Input B. If no gap can be proven, return ["${fallbackText}"].
@@ -253,15 +259,19 @@ function formatSummary(summary: GeminiSummary) {
       const { key, label } = section;
       const format = "format" in section ? section.format : undefined;
 
-      if (format === "markdown-table") {
-        const matrix = typeof summary[key] === "string" ? summary[key].trim() : "";
-        const fallbackMatrix = [
-          "| Target Entity / Variable | Text-Derived Measurement / Composition | Diagram-Derived Data & Calculations | High-Yield Exam Context |",
-          "| :--- | :--- | :--- | :--- |",
-          `| ${fallbackText} | ${fallbackText} | N/A - Text Only | ${fallbackText} |`,
+      if (format === "premium-cards") {
+        const cards = typeof summary[key] === "string" ? summary[key].trim() : "";
+        const fallbackCards = [
+          "### \uD83E\uDDE9 Key scientific data",
+          `* \uD83C\uDFAF **Core Measurement / Text Data:** ${fallbackText}`,
+          "* \uD83E\uDDE0 **Visual / Diagram Calculation:** Text-derived concept only.",
+          "* \uD83D\uDEA8 **Examiner's Trap:** Do not add measurements or visual labels that are not present in the uploaded material.",
+          "",
+          "> **\uD83D\uDCA1 The Winning Move:** State only the verified scientific value, its unit, and the condition attached to it.",
+          "---",
         ].join("\n");
 
-        return `## ${label}\n${matrix.startsWith("|") ? matrix : fallbackMatrix}`;
+        return `## ${label}\n${cards.startsWith("###") && !cards.includes("|") ? cards : fallbackCards}`;
       }
 
       const items = normalizeSection(summary[key]);
