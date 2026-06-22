@@ -2,9 +2,23 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
+  compress: true,
   devIndicators: false,
+  images: {
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 31_536_000,
+  },
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+  },
   poweredByHeader: false,
   async headers() {
+    const immutableAssetHeaders = [
+      {
+        key: "Cache-Control",
+        value: "public, max-age=31536000, immutable",
+      },
+    ];
     const securityHeaders = [
       {
         key: "X-Frame-Options",
@@ -53,6 +67,38 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: securityHeaders,
+      },
+      {
+        source: "/dashboard-preview.png",
+        headers: immutableAssetHeaders,
+      },
+      {
+        source: "/file.svg",
+        headers: immutableAssetHeaders,
+      },
+      {
+        source: "/globe.svg",
+        headers: immutableAssetHeaders,
+      },
+      {
+        source: "/next.svg",
+        headers: immutableAssetHeaders,
+      },
+      {
+        source: "/vercel.svg",
+        headers: immutableAssetHeaders,
+      },
+      {
+        source: "/window.svg",
+        headers: immutableAssetHeaders,
+      },
+      {
+        source: "/pdf.min.js",
+        headers: immutableAssetHeaders,
+      },
+      {
+        source: "/pdf.worker.min.js",
+        headers: immutableAssetHeaders,
       },
     ];
   },
