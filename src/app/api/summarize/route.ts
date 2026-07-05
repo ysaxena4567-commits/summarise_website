@@ -30,6 +30,29 @@ type ExtractedDocument = {
   text: string;
 };
 
+type DetectedRole =
+  | "CHAPTER_NOTES"
+  | "PYQ_QUESTION_PAPER"
+  | "QUESTION_BANK"
+  | "CLASS_HANDOUT"
+  | "SHORT_NOTES"
+  | "UNKNOWN";
+
+type PreparedDocument = ExtractedDocument & {
+  role: DetectedRole;
+  extractionQuality: string;
+  questionLines: string[];
+  sourceChars: number;
+};
+
+type PreparedDataset = {
+  documents: PreparedDocument[];
+  pyqDetected: boolean;
+  questionLineCount: number;
+  chunkingUsed: boolean;
+  context: string;
+};
+
 type StructuredSummary = Record<string, unknown>;
 
 class AiProviderError extends Error {
@@ -183,6 +206,150 @@ function prioritizeDocumentText(text: string, maxChars: number) {
   return compact || cleaned.slice(0, maxChars).trim();
 }
 
+function detectDocumentRole(name: string, text: string): DetectedRole {
+  const haystack = `${name}\n${text.slice(0, 20_000)}`.toLowerCase();
+
+  if (/\b(pyq|previous\s*year|question\s*paper|sample\s*paper|model\s*paper|exam\s*paper|part[-\s]*a|part[-\s]*b|two\s*marks?|long\s*answer|short\s*answer)\b/.test(haystack)) {
+    return "PYQ_QUESTION_PAPER";
+  }
+
+  if (/\b(question\s*bank|viva|define|explain|what\s+is|describe|differentiate|short\s+note|numericals?)\b/.test(haystack)) {
+    return "QUESTION_BANK";
+  }
+
+  if (/\b(handout|worksheet|assignment|class\s*notes?)\b/.test(haystack)) {
+    return "CLASS_HANDOUT";
+  }
+
+  if (/\b(short\s*notes?|revision|mug\s*up|summary|cheat\s*sheet)\b/.test(haystack)) {
+    return "SHORT_NOTES";
+  }
+
+  if (/\b(chapter|unit|module|ncert|textbook|notes?|definition|concept|formula|diagram|table)\b/.test(haystack)) {
+    return "CHAPTER_NOTES";
+  }
+
+  return "UNKNOWN";
+}
+
+function extractionQuality(text: string) {
+  const cleaned = cleanExtractedText(text);
+  const alphaCount = (cleaned.match(/[A-Za-z]/g) || []).length;
+  const alphaRatio = cleaned.length ? alphaCount / cleaned.length : 0;
+
+  if (cleaned.length < 500) return "WEAK: very little readable text extracted";
+  if (alphaRatio < 0.35) return "WEAK: extraction appears noisy or OCR-like";
+  if (cleaned.length < 3_000) return "MEDIUM: readable but short";
+  return "GOOD: readable extracted text";
+}
+
+function extractQuestionLikeLines(text: string, maxLines = 80) {
+  const seen = new Set<string>();
+  const questionPattern =
+    /\b(define|explain|describe|differentiate|distinguish|what\s+is|why|how|derive|calculate|prove|write\s+short\s+note|short\s+note|give\s+reason|draw|label|diagram|compare|discuss|state|list|enumerate|marks?|part[-\s]*a|part[-\s]*b|viva|numerical)\b/i;
+
+  return cleanExtractedText(text)
+    .split(/\n+|(?<=[?])\s+|(?<=\.)\s+(?=\d+[\).])/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => {
+      if (line.length < 12 || line.length > 320) return false;
+      if (!questionPattern.test(line) && !line.includes("?")) return false;
+      const key = line.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, maxLines);
+}
+
+function compactChapterEvidence(text: string, maxChars: number) {
+  const cleaned = cleanExtractedText(text);
+  if (cleaned.length <= maxChars) return cleaned;
+
+  const chunks = cleaned.match(/[\s\S]{1,12000}/g) || [cleaned];
+  const chunkNotes = chunks.map((chunk, index) => {
+    const evidence = prioritizeDocumentText(chunk, Math.max(1200, Math.floor(maxChars / Math.max(chunks.length, 1))));
+    return `[Chunk ${index + 1} dense evidence]\n${evidence}`;
+  });
+
+  return chunkNotes.join("\n\n").slice(0, maxChars).trim();
+}
+
+function prepareDataset(documents: ExtractedDocument[], maxChars: number): PreparedDataset {
+  const preparedDocuments = documents.map((document) => {
+    const text = cleanExtractedText(document.text);
+    const role = detectDocumentRole(document.name, text);
+    const questionLines = extractQuestionLikeLines(text);
+
+    return {
+      ...document,
+      text,
+      role,
+      extractionQuality: extractionQuality(text),
+      questionLines,
+      sourceChars: text.length,
+    };
+  });
+
+  const pyqDocuments = preparedDocuments.filter((document) =>
+    ["PYQ_QUESTION_PAPER", "QUESTION_BANK"].includes(document.role),
+  );
+  const pyqDetected = pyqDocuments.length > 0;
+  const questionLineCount = pyqDocuments.reduce((total, document) => total + document.questionLines.length, 0);
+  const totalChars = preparedDocuments.reduce((total, document) => total + document.text.length, 0);
+  const chunkingUsed = totalChars > maxChars;
+  const pyqBudget = Math.min(Math.floor(maxChars * 0.38), 36_000);
+  const remainingBudget = Math.max(maxChars - pyqBudget, 20_000);
+  const nonPyqDocuments = preparedDocuments.filter((document) => !pyqDocuments.includes(document));
+  const chapterBudget = Math.max(Math.floor(remainingBudget / Math.max(nonPyqDocuments.length, 1)), 8_000);
+  const pyqPerFileBudget = Math.max(Math.floor(pyqBudget / Math.max(pyqDocuments.length, 1)), 8_000);
+
+  const orderedDocuments = [...pyqDocuments, ...nonPyqDocuments];
+  const context = orderedDocuments
+    .map((document, index) => {
+      const isPyq = ["PYQ_QUESTION_PAPER", "QUESTION_BANK"].includes(document.role);
+      const evidenceText = isPyq
+        ? [
+            document.questionLines.length
+              ? `[Extracted question-like lines]\n${document.questionLines.join("\n")}`
+              : "[Extraction note]\nPYQ/question-paper file was uploaded, but readable question text could not be extracted clearly. Upload a clearer/text-based PDF for stronger PYQ probability analysis.",
+            "[Readable extracted text]\n" + prioritizeDocumentText(document.text, pyqPerFileBudget),
+          ].join("\n\n")
+        : compactChapterEvidence(document.text, chapterBudget);
+
+      return [
+        `[FILE ${index + 1}]`,
+        `Name: ${document.name}`,
+        `Detected role: ${document.role}`,
+        `Extraction quality: ${document.extractionQuality}`,
+        `Extracted character count: ${document.sourceChars}`,
+        `Question-like line count: ${document.questionLines.length}`,
+        "Extracted text:",
+        evidenceText,
+      ].join("\n");
+    })
+    .join("\n\n---\n\n")
+    .slice(0, maxChars);
+
+  console.log("Summary dataset prepared", {
+    uploadedFileCount: preparedDocuments.length,
+    filenames: preparedDocuments.map((document) => document.name),
+    detectedRoles: preparedDocuments.map((document) => document.role),
+    extractedCharacterCounts: preparedDocuments.map((document) => document.sourceChars),
+    pyqDetected,
+    extractedQuestionLikeLineCount: questionLineCount,
+    chunkingUsed,
+  });
+
+  return {
+    documents: preparedDocuments,
+    pyqDetected,
+    questionLineCount,
+    chunkingUsed,
+    context,
+  };
+}
+
 function normalizeUploadedDocument(document: UploadedDocumentInput, index: number): ExtractedDocument {
   const name = document.name?.trim() || `uploaded-document-${index + 1}`;
   const text = cleanExtractedText(document.text || "");
@@ -198,128 +365,96 @@ function normalizeUploadedDocument(document: UploadedDocumentInput, index: numbe
   };
 }
 
-function buildPrompt(documents: ExtractedDocument[], instructions: string) {
-  const sourceText = documents
-    .map((document, index) => {
-      return `DOCUMENT ${index + 1}: ${document.name}\n${document.text.trim()}`;
-    })
-    .join("\n\n---\n\n")
-    .slice(0, MAX_TEXT_CHARS);
-
+function buildDatasetPrompt(dataset: PreparedDataset, instructions: string) {
   const instructionBlock = instructions
-    ? `\nUser's optional summary instructions:\n${instructions}\n\nFollow these instructions only when they do not conflict with the critical grounding rules or required JSON output shape.\n`
-    : "";
+    ? `\nUSER INSTRUCTIONS:\n${instructions}\n\nApply these only when they do not conflict with grounding, PYQ extraction, or the required 8-section output.\n`
+    : "\nUSER INSTRUCTIONS:\nNo extra user instructions provided.\n";
 
-  return `You are Semester Hacker Engine v1.0 inside JustFlamsit: an elite Academic Data Scientist and Master Exam Analyst.
+  const pyqStatus = dataset.pyqDetected
+    ? dataset.questionLineCount > 0
+      ? `PYQ/question-paper evidence detected with ${dataset.questionLineCount} readable question-like lines.`
+      : "PYQ/question-paper file was uploaded, but readable question text could not be extracted clearly. Do not pretend PYQ text is available."
+    : "No dedicated PYQ/question-paper file was detected. Generate chapter-derived predictions only and label them as chapter-derived.";
 
-You ingest two academic inputs:
-- Input A: the source theory, chapter, textbook, notes, or assignment.
-- Input B: previous year questions, sample questions, or historical exam patterns.
+  return `You are JustFlamsit AI, an elite exam-focused document intelligence system for students.
 
-If the upload contains multiple files, infer Input A and Input B from filenames and content:
-- Files with many question marks, marks labels, years, "PYQ", "sample", "question", or "paper" are Input B.
-- Files with chapter prose, definitions, examples, formulas, diagrams, or theory are Input A.
-- If classification is uncertain, still perform the analysis but explicitly mark the uncertain source classification in Section 1.
+Your job is to analyze uploaded chapter PDFs, 100-page notes, PYQs, question papers, handouts, DOCX, and TXT files together and generate a dense, accurate, exam-scoring summary.
 
-CRITICAL RULES:
-- Use ONLY the information explicitly present in the uploaded document text below.
-- Never invent facts.
-- Never guess.
-- Never add information that is not in the document text.
-- If a category has no relevant information, return exactly: ${fallbackText}
-- Ground every claim in Input A or Input B, but never show raw source tags such as [METRIC], [Input A], or [Document Page X]. Weave a source heading naturally into a sentence only when it makes the finding clearer.
-- Priority weightings must be proportional to frequency in Input B. Count recurring terms/concepts/question patterns from Input B and use those counts in Section 1 and Section 4.
-- Treat diagrams, tables, flowcharts, cycles, figures, graph labels, and captions as high-value exam material. Extract them when the uploaded text contains captions, labels, table rows, or figure references.
-- If a PDF is scanned/image-heavy and only sparse captions are extracted, state that limitation exactly. Do not invent unseen visual content.
-- Be ruthless: remove conversational filler, broad history, and low-signal explanation.
-- Preserve only the mechanics needed to score marks with minimum effort.
-- Be thorough. Do not skip names, dates, events, causes, results, definitions, formulas, derivations, examples, diagrams, exceptions, or important facts that appear in the document.
-- Preserve original meaning, names, date ranges, and chronology.
-- If chapter notes and previous-year questions are both uploaded, connect topics to questions only when the documents support the connection.
-- If multiple files are uploaded, combine overlapping information only when the documents support it.
-- Keep the response structured with clear headings once formatted. Use short bullets, double line breaks between distinct ideas, and blockquotes for the most important takeaway in a section.
-- Use bullet-point style strings inside each JSON array.
-- Use emojis only as visual anchors: 🎯 for core data, 🧠 for analysed/calculated data, 🚨 for risk, and 💡 for the winning move.
-- Bold only the exact keywords, scientific names, formulas, and numerical values an examiner needs to see.
-- Maintain an authoritative, sharp, clinical, intensely tactical, protective tone.
+You must act like:
+- a semester exam strategist
+- a PYQ pattern analyzer
+- a strict grounded summarizer
+- a teacher who knows what students must revise first
+- a last-night-before-exam mentor
 
+Use ONLY the uploaded document content.
+Do not hallucinate.
+Do not add unsupported outside textbook knowledge.
+If a detail is not present, say "Not mentioned in the uploaded material."
+But before saying that, carefully check all uploaded files, especially PYQ/question-paper files.
+
+Dataset status:
+- Uploaded files analyzed: ${dataset.documents.length}
+- ${pyqStatus}
+- Long-document compression used: ${dataset.chunkingUsed ? "yes" : "no"}
+
+When multiple files are uploaded:
+1. Identify chapter/source files.
+2. Identify PYQ/question-paper files.
+3. Extract key concepts from chapter files.
+4. Extract actual questions from PYQ/question-paper files.
+5. Match PYQ questions to chapter concepts.
+6. Rank topics by importance using repeated concepts, direct PYQ questions, headings, definitions, formulas, examples, diagram mentions, and examiner-style wording.
+7. Produce a final answer using EXACTLY the existing 8-section JustFlamsit layout.
+
+Do not reveal internal reasoning.
+Do not create new section headings.
+Do not change section names.
+Do not output generic filler.
+Be dense, specific, and practical.
+
+UPLOADED FILE DATASET
+
+${dataset.context}
+${instructionBlock}
+
+TASK:
+Analyze all uploaded files together. Treat chapter files as source material and PYQ/question-paper files as exam-pattern evidence. Generate the existing JustFlamsit 8-section structured summary only. Make the output dense, accurate, exam-focused, PYQ-mapped, and useful for semester exams.
+
+STRICT FINAL OUTPUT:
 Return ONLY valid JSON. Do not wrap it in markdown. Do not add commentary.
-The JSON must match this exact shape:
+Use exactly these 8 keys and no other keys:
 
 {
-  "weightageTrendRadar": ["Overall chapter priority: ...", "Trend analysis: ..."],
-  "coreHeadlines": ["🎯 Topic Name - Priority Level: Critical/High/Medium | Core Concept: ... | Standard Exam Definition: ..."],
-  "multimodalExtractionMatrix": "### 🧩 Target Entity Name\\n* 🎯 **Core Measurement / Text Data:** ...\\n* 🧠 **Visual / Diagram Calculation:** ...\\n* 🚨 **Examiner's Trap:** ...\\n\\n> **💡 The Winning Move:** ...\\n---",
-  "pyqProbabilityAnalysis": ["🎯 **High-Importance Question from Uploaded PYQ:** [Copy the question exactly as it appears in Input B] | Why it matters: ... | Frequency Score: ... | Prediction Confidence: ... | Winning Framework: ..."],
-  "hiddenTraps": ["The Hidden Concept: ... | The Examiner's Trap: ... | The Counter-Shield: ..."],
-  "phoenixGapAnalysis": ["Statistically Overdue Topic: ... | Warning: The professor has ignored this dense topic for several cycles, making it a high-risk candidate for a surprise high-weightage question on this upcoming paper. | Sleeper Topic Summary: ..."],
-  "sprintPracticeQuestions": ["Practice Question: ... | Evaluation Guide: ..."],
+  "weightageTrendRadar": ["Overall chapter priority: High/Medium/Low | Why: ... | Exam nature: definition-heavy/concept-heavy/formula-heavy/diagram-heavy/numerical-heavy | PYQ trend evidence: ..."],
+  "coreHeadlines": ["Topic: ... | Priority: High/Medium/Low | Exam-ready explanation: ... | Key terms to memorize: ... | Likely question wording: ... | Source hint: ... | Why it matters: ..."],
+  "multimodalExtractionMatrix": "### Key definition/formula/diagram/table/example\\n* **Core Measurement / Text Data:** ...\\n* **Visual / Diagram Calculation:** ...\\n* **Examiner's Trap:** ...\\n\\n> **The Winning Move:** ...\\n---",
+  "pyqProbabilityAnalysis": ["Question: [actual readable PYQ/question line, if present] | Mapped topic: ... | Probability: High/Medium/Low | Type: definition/short answer/long answer/numerical/diagram/comparison | Why it matters: ... | Repeated/similar wording: ... | Answer framework: ..."],
+  "hiddenTraps": ["Trap topic: ... | Common mistake: ... | Similar terms to differentiate: ... | Examiner warning: ... | Exact wording to remember: ..."],
+  "phoenixGapAnalysis": ["High-risk gap: ... | Evidence: ... | Why it may appear: ... | Revision action: ..."],
+  "sprintPracticeQuestions": ["Question: ... | Marks/type: ... | Evaluation guide: ..."],
   "eleventhHourLifeline": ["Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5", "Bullet 6", "Bullet 7", "Bullet 8", "Bullet 9", "Bullet 10"]
 }
 
-Section-specific mandates:
-- Section 1 must assign a definitive percentage, marks trend, or priority class based on Input B frequency. If total exam marks are not available, use "High/Medium/Low Priority" with observed frequency counts.
-- Section 2 must isolate the absolute critical 20% of topics that produce most marks and ground every topic in the uploaded material.
-- Section 2 must include exam-critical diagrams/tables as core topics when Input A or Input B indicates they are important.
-- Section 3 is exclusively the Multimodal Extraction & Calculation Matrix. Return it as one Markdown string made of vertical Premium List Cards. Never use a Markdown table, pipes, or table divider rows.
-- Every Section 3 entity must follow this exact card structure:
-  ### 🧩 [Target Entity Name]
-  * 🎯 **Core Measurement / Text Data:** [Exact value, unit, composition, formula, range, or process fact]
-  * 🧠 **Visual / Diagram Calculation:** [Diagram/graph/table value or calculation; otherwise write exactly: Text-derived concept only.]
-  * 🚨 **Examiner's Trap:** [The precise confusion, exception, unit error, or wording trap supported by the source]
+Section rules:
+- SECTION 1 content must include overall chapter priority, why assigned, most exam-relevant subtopics, PYQ trend evidence when readable PYQ exists, and whether the chapter is definition-heavy, concept-heavy, formula-heavy, diagram-heavy, or numerical-heavy.
+- SECTION 2 must contain only highest-yield topics. Do not use phrases like "Uploaded document concept." Make every point a polished study note.
+- SECTION 3 must use vertical Premium List Cards only. Never use a markdown table. Include definitions, formulas, numerical patterns, diagrams/visual topics, tables/classifications, and examples only when present. If absent, write: "No clear formula/diagram evidence was found in extracted text."
+- SECTION 4 is most important when PYQ/question paper is uploaded. If readable question text exists, use actual question-like lines and never write "Question: Not mentioned." If PYQ was uploaded but unreadable, write exactly: "PYQ/question-paper file was not readable enough for reliable question extraction." Then create likely chapter-derived questions and label them chapter-derived.
+- SECTION 5 must contain real traps from the uploaded chapter content, not generic warnings.
+- SECTION 6 must identify chapter topics weak/missing in PYQ, PYQ topics weakly explained in notes, foundational surprise topics, and unreadable/unclear PDF areas. If PYQ data is limited, say: "Frequency-based prediction is limited because only limited readable PYQ content was extracted."
+- SECTION 7 must generate practice questions based only on uploaded material, including 2-mark, 5-mark, long-answer, PYQ-style, and diagram/formula/numerical questions when supported.
+- SECTION 8 must be an ultra-condensed last-minute rescue sheet with exactly 10 bullets.
 
-  > **💡 The Winning Move:** [One tactical sentence that explains how to secure full marks.]
-  ---
-- In Section 3, extract every explicit numerical measurement, range, scale, dimension, variable, formula, chemical composition, equation, unit, concentration, temperature, pH, volume, rate, yield, labelled process sequence, table value, and derivation fact present in Input A.
-- Preserve values and scientific units exactly as written. Do not round, convert, or infer values unless the calculation is mathematically deducible from values, scales, axes, labels, or annotations present in the uploaded text.
-- For each card, use visual/diagram data only when captions, labels, figure references, table rows, graph axes, scale values, or annotations are explicitly present in the uploaded text. Otherwise write exactly: Text-derived concept only.
-- For a scanned or image-only PDF with no extracted visual labels, do not claim to inspect a diagram. Use "Text-derived concept only." and make the limitation clear in the trap or winning-move line.
-- If no qualifying data exists, return one complete Premium List Card whose text-data line says "${fallbackText}".
-- Section 4 must include the top 5 recurring question types from Input B whenever available.
-- When Input B is present, Section 4 must first select the highest-importance questions from the uploaded PYQ/sample-paper text itself. Preserve each selected question's wording exactly; do not rewrite, merge, or invent an uploaded question. Rank it using recurrence, marks cues, coverage of core chapter concepts, and explicit emphasis in Input B.
-- Section 4 must make the source distinction obvious: each selected uploaded question begins with "🎯 **High-Importance Question from Uploaded PYQ:**". Include why it matters, its observed frequency, a confidence level, and a concise answer framework.
-- Section 5 must focus on footnotes, exceptions, edge cases, diagrams, table traps, labelled-process traps, phrasing traps, and short-answer traps found in Input A.
-- Section 6 must identify dense foundational concepts from Input A that are under-tested in Input B. If no gap can be proven, return ["${fallbackText}"].
-- Section 7 must generate exactly 5 unique teacher/professor-style practice questions. They must be academically rigorous, grounded in Input A, and model the wording, difficulty, marks pattern, and topic trends of Input B without copying any Input B question verbatim. Include a concise evaluation guide for each.
-- Section 8 must contain exactly 10 high-density emergency bullets. No more, no fewer. Include a diagram/table bullet only if the source text supports it.
-
-Every JSON array value must contain plain strings only. Never return JSON objects, nested arrays, key-value objects, or null values inside any section. If a section has no information, use ["${fallbackText}"].
-${instructionBlock}
-
-Uploaded document text:
-
-${sourceText}`;
-}
-
-function buildCompactPrompt(documents: ExtractedDocument[], instructions: string) {
-  const sourceText = documents
-    .map((document, index) => {
-      return `DOCUMENT ${index + 1}: ${document.name}\n${prioritizeDocumentText(document.text, MAX_TEXT_CHARS_RETRY)}`;
-    })
-    .join("\n\n---\n\n")
-    .slice(0, MAX_TEXT_CHARS_RETRY);
-
-  const instructionBlock = instructions
-    ? `\nUser's optional summary instructions:\n${instructions}\n`
-    : "";
-
-  return `You are JustFlamsit AI, an exam-focused document intelligence assistant for students.
-
-Use ONLY the uploaded document text below. Do not hallucinate. If information is not present, write "${fallbackText}".
-
-Return ONLY valid JSON with these exact keys:
-weightageTrendRadar, coreHeadlines, multimodalExtractionMatrix, pyqProbabilityAnalysis, hiddenTraps, phoenixGapAnalysis, sprintPracticeQuestions, eleventhHourLifeline.
-
-Rules:
-- Use plain strings inside arrays only.
-- Section 3 must be one Markdown string using Premium List Cards, not a table.
-- Section 7 must contain exactly 5 teacher/professor-style practice questions grounded in the document.
-- Section 8 must contain exactly 10 emergency revision bullets.
-${instructionBlock}
-
-Uploaded document text:
-
-${sourceText}`;
+Quality gate before final JSON:
+1. All 8 keys are present.
+2. No extra keys are added.
+3. PYQ section does not falsely say PYQ missing when question text exists.
+4. Output is not generic.
+5. Topic names are clean.
+6. Definitions are exam-ready.
+7. Section 8 is useful for last-minute revision.
+8. Every JSON array contains strings only. No nested objects, arrays, null, or booleans.`;
 }
 
 function displayJsonValue(value: unknown): string {
@@ -427,40 +562,51 @@ function extractUsefulLines(text: string, limit = 12) {
     .slice(0, limit);
 }
 
-function buildGroundedContinuitySummary(documents: ExtractedDocument[]) {
-  const mergedText = documents.map((document) => document.text).join("\n\n");
+function buildGroundedContinuitySummary(dataset: PreparedDataset) {
+  const mergedText = dataset.documents.map((document) => document.text).join("\n\n");
   const usefulLines = extractUsefulLines(mergedText, 12);
   const coreLines = usefulLines.slice(0, 6);
   const practiceLines = usefulLines.slice(0, 5);
+  const questionLines = dataset.documents.flatMap((document) => document.questionLines).slice(0, 5);
 
   const structured: StructuredSummary = {
     weightageTrendRadar: [
-      "Overall chapter priority: Generated from the uploaded document text available to JustFlamsit.",
-      "Trend analysis: No separate PYQ frequency pattern could be confirmed unless PYQ/sample-question content is present in the uploaded files.",
+      `Overall chapter priority: ${dataset.pyqDetected && dataset.questionLineCount > 0 ? "High" : "Medium"} | Why: based on ${dataset.documents.length} uploaded file(s), ${dataset.questionLineCount} readable question-like line(s), and extracted chapter evidence. | Exam nature: revise definitions, repeated terms, diagrams/tables when mentioned, and question-linked concepts first.`,
+      dataset.pyqDetected
+        ? dataset.questionLineCount > 0
+          ? `PYQ trend evidence: ${questionLines.slice(0, 3).join(" | ")}`
+          : "PYQ trend evidence: PYQ/question-paper file was uploaded, but readable question text could not be extracted clearly. Upload a clearer/text-based PDF for stronger PYQ probability analysis."
+        : "PYQ trend evidence: No dedicated PYQ/question-paper file was detected, so probability is chapter-derived.",
     ],
     coreHeadlines: coreLines.length
-      ? coreLines.map((line) => `🎯 Uploaded document concept - Priority Level: High | Core Concept: ${line} | Standard Exam Definition: Use the exact wording and terms from this uploaded material.`)
+      ? coreLines.map((line) => `Topic: ${line.slice(0, 80)} | Priority: High | Exam-ready explanation: ${line} | Key terms to memorize: extract exact terms from this line | Likely question wording: Explain or define this concept. | Why it matters: It appears as readable evidence in the uploaded study material.`)
       : [fallbackText],
     multimodalExtractionMatrix: [
-      "### 🧩 Uploaded document evidence",
+      "### Key extracted evidence",
       `* 🎯 **Core Measurement / Text Data:** ${coreLines[0] || fallbackText}`,
       "* 🧠 **Visual / Diagram Calculation:** Text-derived concept only.",
-      "* 🚨 **Examiner's Trap:** Do not add diagram labels, formulas, or measurements that are not visible in the extracted document text.",
+      "* 🚨 **Examiner's Trap:** Do not invent diagram labels, formulas, or measurements unless they are visible in extracted text.",
       "",
-      "> **💡 The Winning Move:** Write answers using only the verified terms extracted from the uploaded file.",
+      "> **💡 The Winning Move:** Quote the extracted keyword, then add only the supported explanation from the uploaded material.",
       "---",
     ].join("\n"),
-    pyqProbabilityAnalysis: usefulLines.length
-      ? usefulLines.slice(0, 5).map((line) => `🎯 **High-Importance Question from Uploaded PYQ:** Not mentioned in the document | Why it matters: ${line} | Frequency Score: Not enough PYQ repetition data found | Prediction Confidence: Low | Winning Framework: Revise this concept directly from the uploaded chapter text.`)
-      : [fallbackText],
+    pyqProbabilityAnalysis: questionLines.length
+      ? questionLines.map((line) => `Question: ${line} | Mapped topic: closest matching chapter concept in the uploaded material | Probability: High | Type: question-paper evidence | Why it matters: It was extracted directly as a question-like line. | Answer framework: define key term, explain mechanism/steps, add diagram/formula only if present.`)
+      : [
+          dataset.pyqDetected
+            ? "PYQ/question-paper file was not readable enough for reliable question extraction. Chapter-derived likely question: Explain the most repeated readable concept from the uploaded material. | Probability: Medium | Type: chapter-derived | Answer framework: Use exact uploaded definitions and key terms."
+            : "Chapter-derived likely question: Explain the highest-yield readable concept from the uploaded material. | Probability: Medium | Type: chapter-derived | Answer framework: Use exact uploaded definitions and key terms.",
+        ],
     hiddenTraps: coreLines.length
-      ? coreLines.slice(0, 4).map((line) => `The Hidden Concept: ${line} | The Examiner's Trap: Confusing this extracted point with outside knowledge. | The Counter-Shield: Stick to the uploaded wording and avoid unsupported additions.`)
+      ? coreLines.slice(0, 4).map((line) => `Trap topic: ${line.slice(0, 90)} | Common mistake: writing a broad answer without the exact extracted keyword. | Similar terms to differentiate: compare only terms that appear nearby in uploaded text. | Examiner warning: do not add unsupported textbook facts.`)
       : [fallbackText],
     phoenixGapAnalysis: [
-      "Statistically Overdue Topic: Not mentioned in the document | Warning: A reliable gap analysis needs both chapter text and recurring PYQ/sample-question patterns. | Sleeper Topic Summary: Upload PYQ files with the chapter to unlock stronger frequency-based predictions.",
+      dataset.questionLineCount > 0
+        ? "High-risk gap: Compare extracted PYQ question lines against the chapter concepts above. | Evidence: Some readable questions are present, but frequency clustering was limited by extracted text quality. | Revision action: revise every topic mapped to an extracted question line first."
+        : "High-risk gap: Frequency-based prediction is limited because only limited readable PYQ content was extracted. | Evidence: No strong question-line cluster was readable. | Revision action: revise chapter headings, definitions, examples, and diagram/table mentions first.",
     ],
     sprintPracticeQuestions: practiceLines.length
-      ? practiceLines.map((line, index) => `Practice Question: Explain the exam significance of this uploaded concept ${index + 1}: ${line} | Evaluation Guide: Award marks for exact keywords, correct sequence, and no unsupported outside facts.`)
+      ? practiceLines.map((line, index) => `Question: ${index + 1 <= 2 ? "2-mark" : index + 1 <= 4 ? "5-mark" : "Long-answer"} practice from uploaded material: ${line} | Evaluation guide: include exact keyword, one direct explanation, and one supported example/step if present.`)
       : [fallbackText],
     eleventhHourLifeline: Array.from({ length: 10 }, (_, index) => {
       const line = usefulLines[index % Math.max(usefulLines.length, 1)];
@@ -595,19 +741,22 @@ async function summarizeWithGemini(prompt: string) {
 }
 
 async function summarizeWithGeminiRetry(documents: ExtractedDocument[], instructions: string) {
+  const fullDataset = prepareDataset(documents, MAX_TEXT_CHARS);
+
   try {
-    return await summarizeWithGemini(buildPrompt(documents, instructions));
+    return await summarizeWithGemini(buildDatasetPrompt(fullDataset, instructions));
   } catch (error) {
     console.log("Gemini summary retrying with compact prompt", {
       message: error instanceof Error ? error.message : "unknown",
     });
     try {
-      return await summarizeWithGemini(buildCompactPrompt(documents, instructions));
+      const compactDataset = prepareDataset(documents, MAX_TEXT_CHARS_RETRY);
+      return await summarizeWithGemini(buildDatasetPrompt(compactDataset, instructions));
     } catch (retryError) {
       console.log("Gemini summary continuity response used", {
         message: retryError instanceof Error ? retryError.message : "unknown",
       });
-      return buildGroundedContinuitySummary(documents);
+      return buildGroundedContinuitySummary(fullDataset);
     }
   }
 }
@@ -657,7 +806,19 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Upload ${MAX_FILES} files or fewer.` }, { status: 400 });
       }
 
-      documents = uploadedDocuments.map(normalizeUploadedDocument);
+      documents = uploadedDocuments
+        .map((document, index) => {
+          try {
+            return normalizeUploadedDocument(document, index);
+          } catch (error) {
+            console.log("Uploaded JSON document skipped after extraction failure", {
+              name: document.name || `uploaded-document-${index + 1}`,
+              message: error instanceof Error ? error.message : "unknown",
+            });
+            return null;
+          }
+        })
+        .filter((document): document is ExtractedDocument => document !== null);
     } else {
       const formData = await request.formData();
       instructions = normalizeInstructions(formData.get("instructions"));
@@ -673,7 +834,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Upload ${MAX_FILES} files or fewer.` }, { status: 400 });
       }
 
-      documents = await Promise.all(files.map(extractDocumentText));
+      const extractionResults = await Promise.allSettled(files.map(extractDocumentText));
+      documents = extractionResults
+        .map((result, index) => {
+          if (result.status === "fulfilled") return result.value;
+
+          console.log("Uploaded file skipped after extraction failure", {
+            name: files[index]?.name || `uploaded-file-${index + 1}`,
+            message: result.reason instanceof Error ? result.reason.message : "unknown",
+          });
+          return null;
+        })
+        .filter((document): document is ExtractedDocument => document !== null);
     }
 
     const availableDocuments = documents.filter((document) => document.text.trim().length > 0);
