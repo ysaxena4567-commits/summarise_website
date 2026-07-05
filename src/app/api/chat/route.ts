@@ -76,7 +76,7 @@ function getAllowedOrigins(request: Request) {
 }
 
 function getDeepSeekApiKey() {
-  return (process.env.DEEPSEEK_API_KEY || "").trim();
+  return (process.env.DEEPSEEK_API_KEY || process.env.deepseek_api_key || "").trim();
 }
 
 function normalizeMessages(value: unknown): DeepSeekMessage[] {

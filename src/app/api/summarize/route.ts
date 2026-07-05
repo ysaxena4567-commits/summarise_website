@@ -337,6 +337,7 @@ function formatAiSummaryText(text: string) {
 function getDeepSeekApiKey() {
   return (
     process.env.DEEPSEEK_API_KEY ||
+    process.env.deepseek_api_key ||
     ""
   ).trim();
 }
