@@ -355,57 +355,68 @@ async function summarizeWithDeepSeek(prompt: string) {
   const timeoutId = setTimeout(() => abortController.abort(), 45_000);
 
   try {
-    const deepSeekResponse = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      signal: abortController.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: DEEPSEEK_MODEL,
-        temperature: 0.2,
-        max_tokens: 4096,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are JustFlamsit AI, an exam-focused document intelligence assistant for students. Your job is to generate accurate, grounded, structured study outputs from uploaded documents such as chapter notes, PYQs, handouts, PDFs, DOCX, and TXT files. Use only the uploaded document content. Do not hallucinate. If information is not present in the document, write: \"Not mentioned in the document.\" Keep the answer useful for semester exams and viva preparation. Preserve the same structured sections currently used by JustFlamsit. Include all sections that the existing summary layout expects. Keep the tone clear, concise, and student-friendly. Make the summary practical for last-minute revision.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-    });
+    const configuredModel = DEEPSEEK_MODEL.trim() || "deepseek-chat";
+    const modelsToTry = configuredModel === "deepseek-chat" ? ["deepseek-chat"] : [configuredModel, "deepseek-chat"];
+    let lastFailure: { status?: number; message: string } | null = null;
 
-    const data = await deepSeekResponse.json().catch(() => ({}));
-
-    if (!deepSeekResponse.ok) {
-      const message =
-        typeof data?.error?.message === "string"
-          ? data.error.message
-          : "DeepSeek summarization failed.";
-      console.log("DeepSeek summary failed", {
-        status: deepSeekResponse.status,
-        message,
+    for (const model of modelsToTry) {
+      const deepSeekResponse = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        signal: abortController.signal,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          max_tokens: 4096,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are JustFlamsit AI, an exam-focused document intelligence assistant for students. Your job is to generate accurate, grounded, structured study outputs from uploaded documents such as chapter notes, PYQs, handouts, PDFs, DOCX, and TXT files. Use only the uploaded document content. Do not hallucinate. If information is not present in the document, write: \"Not mentioned in the document.\" Keep the answer useful for semester exams and viva preparation. Preserve the same structured sections currently used by JustFlamsit. Include all sections that the existing summary layout expects. Keep the tone clear, concise, and student-friendly. Make the summary practical for last-minute revision.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        }),
       });
-      throw new AiProviderError(message, deepSeekResponse.status);
+
+      const data = await deepSeekResponse.json().catch(() => ({}));
+
+      if (!deepSeekResponse.ok) {
+        const message =
+          typeof data?.error?.message === "string"
+            ? data.error.message
+            : "DeepSeek summarization failed.";
+        lastFailure = { status: deepSeekResponse.status, message };
+        console.log("DeepSeek summary failed", {
+          model,
+          status: deepSeekResponse.status,
+          message,
+        });
+        continue;
+      }
+
+      const text =
+        typeof data?.choices?.[0]?.message?.content === "string"
+          ? data.choices[0].message.content.trim()
+          : "";
+
+      if (!text) {
+        lastFailure = { status: deepSeekResponse.status, message: "Empty response" };
+        console.log("DeepSeek summary failed", { model, status: deepSeekResponse.status, message: "Empty response" });
+        continue;
+      }
+
+      console.log("DeepSeek summary generated successfully");
+      return formatAiSummaryText(text);
     }
 
-    const text =
-      typeof data?.choices?.[0]?.message?.content === "string"
-        ? data.choices[0].message.content.trim()
-        : "";
-
-    if (!text) {
-      console.log("DeepSeek summary failed", { status: deepSeekResponse.status, message: "Empty response" });
-      throw new AiProviderError("DeepSeek did not return a summary.", deepSeekResponse.status);
-    }
-
-    console.log("DeepSeek summary generated successfully");
-    return formatAiSummaryText(text);
+    throw new AiProviderError(lastFailure?.message || "DeepSeek summarization failed.", lastFailure?.status);
   } catch (error) {
     if (error instanceof AiProviderError) {
       throw error;
