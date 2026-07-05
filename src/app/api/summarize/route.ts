@@ -12,6 +12,8 @@ import { clientIp, rateLimit, requireSameOrigin } from "@/lib/security";
 export const runtime = "nodejs";
 
 const GEMINI_MODEL = "gemini-2.5-flash-lite";
+const DEEPSEEK_MODEL = "deepseek-chat";
+const AI_BUSY_MESSAGE = "AI servers are busy right now. Please try again in a few minutes.";
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_REQUEST_BYTES = MAX_FILES * MAX_FILE_BYTES + 256_000;
@@ -25,6 +27,18 @@ type ExtractedDocument = {
 };
 
 type GeminiSummary = Record<string, unknown>;
+
+class AiProviderError extends Error {
+  constructor(
+    message: string,
+    public readonly transient: boolean,
+    public readonly provider: "gemini" | "deepseek",
+    public readonly status?: number,
+  ) {
+    super(message);
+    this.name = "AiProviderError";
+  }
+}
 
 type UploadedDocumentInput = {
   name?: string;
@@ -346,6 +360,182 @@ function extractGeminiText(response: unknown) {
   }
 }
 
+function isTransientAiFailure(status?: number, message = "") {
+  const normalizedMessage = message.toLowerCase();
+
+  return (
+    status === 429 ||
+    status === 503 ||
+    normalizedMessage.includes("429") ||
+    normalizedMessage.includes("503") ||
+    normalizedMessage.includes("rate limit") ||
+    normalizedMessage.includes("ratelimit") ||
+    normalizedMessage.includes("quota") ||
+    normalizedMessage.includes("high demand") ||
+    normalizedMessage.includes("overload") ||
+    normalizedMessage.includes("overloaded") ||
+    normalizedMessage.includes("temporarily unavailable") ||
+    normalizedMessage.includes("temporary unavailable") ||
+    normalizedMessage.includes("resource exhausted") ||
+    normalizedMessage.includes("unavailable")
+  );
+}
+
+async function summarizeWithGemini(prompt: string, apiKey: string) {
+  try {
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            topP: 0.2,
+            maxOutputTokens: 4096,
+            responseMimeType: "application/json",
+          },
+        }),
+      },
+    );
+
+    const data = await geminiResponse.json().catch(() => ({}));
+
+    if (!geminiResponse.ok) {
+      const message =
+        typeof data?.error?.message === "string"
+          ? data.error.message
+          : "Gemini summarization failed.";
+      throw new AiProviderError(
+        message,
+        isTransientAiFailure(geminiResponse.status, message),
+        "gemini",
+        geminiResponse.status,
+      );
+    }
+
+    const summary = extractGeminiText(data);
+    console.log("Gemini summary used");
+    return summary;
+  } catch (error) {
+    if (error instanceof AiProviderError) {
+      throw error;
+    }
+
+    const message = error instanceof Error ? error.message : "Gemini summarization failed.";
+    throw new AiProviderError(message, isTransientAiFailure(undefined, message), "gemini");
+  }
+}
+
+async function summarizeWithDeepSeek(prompt: string) {
+  const apiKey = process.env.deepseek_api_key;
+
+  if (!apiKey) {
+    throw new AiProviderError("DeepSeek API key is not configured.", false, "deepseek");
+  }
+
+  try {
+    const deepSeekResponse = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        temperature: 0.2,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are JustFlamsit AI, an exam-focused document intelligence assistant for students. Create accurate, grounded, structured summaries from uploaded documents. Do not hallucinate. If something is not present in the document, say \"Not mentioned in the document.\" Keep the output clear.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      }),
+    });
+
+    const data = await deepSeekResponse.json().catch(() => ({}));
+
+    if (!deepSeekResponse.ok) {
+      const message =
+        typeof data?.error?.message === "string"
+          ? data.error.message
+          : "DeepSeek summarization failed.";
+      throw new AiProviderError(
+        message,
+        isTransientAiFailure(deepSeekResponse.status, message),
+        "deepseek",
+        deepSeekResponse.status,
+      );
+    }
+
+    const text =
+      typeof data?.choices?.[0]?.message?.content === "string"
+        ? data.choices[0].message.content.trim()
+        : "";
+
+    if (!text) {
+      throw new AiProviderError("DeepSeek did not return a summary.", false, "deepseek");
+    }
+
+    try {
+      const parsed = JSON.parse(cleanJsonText(text)) as GeminiSummary;
+      const normalizedSummary = summarySections.reduce<GeminiSummary>((accumulator, section) => {
+        accumulator[section.key] = parsed[section.key] ?? [fallbackText];
+        return accumulator;
+      }, {});
+      console.log("DeepSeek fallback used");
+      return formatSummary(normalizedSummary);
+    } catch {
+      console.log("DeepSeek fallback used");
+      return text;
+    }
+  } catch (error) {
+    if (error instanceof AiProviderError) {
+      throw error;
+    }
+
+    const message = error instanceof Error ? error.message : "DeepSeek summarization failed.";
+    throw new AiProviderError(message, isTransientAiFailure(undefined, message), "deepseek");
+  }
+}
+
+async function generateSummaryWithFallback(prompt: string, geminiApiKey: string) {
+  try {
+    return await summarizeWithGemini(prompt, geminiApiKey);
+  } catch (error) {
+    if (!(error instanceof AiProviderError) || !error.transient) {
+      throw error;
+    }
+
+    console.log("Gemini failed, trying DeepSeek fallback");
+
+    try {
+      return await summarizeWithDeepSeek(prompt);
+    } catch (deepSeekError) {
+      console.log("Both AI providers failed");
+      throw new AiProviderError(
+        AI_BUSY_MESSAGE,
+        true,
+        deepSeekError instanceof AiProviderError ? deepSeekError.provider : "deepseek",
+        deepSeekError instanceof AiProviderError ? deepSeekError.status : undefined,
+      );
+    }
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const originError = requireSameOrigin(request);
@@ -433,41 +623,7 @@ export async function POST(request: Request) {
 
     try {
       const prompt = buildPrompt(availableDocuments, instructions);
-      const geminiResponse = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [{ text: prompt }],
-              },
-            ],
-            generationConfig: {
-              temperature: 0,
-              topP: 0.2,
-              maxOutputTokens: 4096,
-              responseMimeType: "application/json",
-            },
-          }),
-        },
-      );
-
-      const data = await geminiResponse.json();
-
-      if (!geminiResponse.ok) {
-        const message =
-          typeof data?.error?.message === "string"
-            ? data.error.message
-            : "Gemini summarization failed.";
-        throw new Error(message);
-      }
-
-      summary = extractGeminiText(data);
+      summary = await generateSummaryWithFallback(prompt, apiKey);
     } catch (error) {
       await refundServerSummary(usageIdentity);
       throw error;
@@ -492,7 +648,14 @@ export async function POST(request: Request) {
       databaseBacked: usage.databaseBacked,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Something went wrong while summarizing.";
+    const message =
+      error instanceof AiProviderError
+        ? error.transient
+          ? AI_BUSY_MESSAGE
+          : "Something went wrong while summarizing."
+        : error instanceof Error
+          ? error.message
+          : "Something went wrong while summarizing.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
