@@ -381,6 +381,16 @@ function isTransientAiFailure(status?: number, message = "") {
   );
 }
 
+function getDeepSeekApiKey() {
+  return (
+    process.env.deepseek_api_key ||
+    process.env.DEEPSEEK_API_KEY ||
+    process.env.DEEPSEEK_API_TOKEN ||
+    process.env.DEEPSEEK_TOKEN ||
+    ""
+  ).trim();
+}
+
 async function summarizeWithGemini(prompt: string, apiKey: string) {
   try {
     const geminiResponse = await fetch(
@@ -414,6 +424,11 @@ async function summarizeWithGemini(prompt: string, apiKey: string) {
         typeof data?.error?.message === "string"
           ? data.error.message
           : "Gemini summarization failed.";
+      console.log("Gemini summary failed", {
+        status: geminiResponse.status,
+        transient: isTransientAiFailure(geminiResponse.status, message),
+        message,
+      });
       throw new AiProviderError(
         message,
         isTransientAiFailure(geminiResponse.status, message),
@@ -431,14 +446,19 @@ async function summarizeWithGemini(prompt: string, apiKey: string) {
     }
 
     const message = error instanceof Error ? error.message : "Gemini summarization failed.";
+    console.log("Gemini summary failed", {
+      transient: isTransientAiFailure(undefined, message),
+      message,
+    });
     throw new AiProviderError(message, isTransientAiFailure(undefined, message), "gemini");
   }
 }
 
 async function summarizeWithDeepSeek(prompt: string) {
-  const apiKey = process.env.deepseek_api_key || process.env.DEEPSEEK_API_KEY;
+  const apiKey = getDeepSeekApiKey();
 
   if (!apiKey) {
+    console.log("DeepSeek summary unavailable: API key is missing");
     throw new AiProviderError("DeepSeek API key is not configured.", false, "deepseek");
   }
 
@@ -453,6 +473,7 @@ async function summarizeWithDeepSeek(prompt: string) {
         model: DEEPSEEK_MODEL,
         temperature: 0.2,
         max_tokens: 4096,
+        response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
@@ -474,6 +495,11 @@ async function summarizeWithDeepSeek(prompt: string) {
         typeof data?.error?.message === "string"
           ? data.error.message
           : "DeepSeek summarization failed.";
+      console.log("DeepSeek summary failed", {
+        status: deepSeekResponse.status,
+        transient: isTransientAiFailure(deepSeekResponse.status, message),
+        message,
+      });
       throw new AiProviderError(
         message,
         isTransientAiFailure(deepSeekResponse.status, message),
@@ -488,6 +514,7 @@ async function summarizeWithDeepSeek(prompt: string) {
         : "";
 
     if (!text) {
+      console.log("DeepSeek summary failed", { status: deepSeekResponse.status, message: "Empty response" });
       throw new AiProviderError("DeepSeek did not return a summary.", false, "deepseek");
     }
 
@@ -509,12 +536,16 @@ async function summarizeWithDeepSeek(prompt: string) {
     }
 
     const message = error instanceof Error ? error.message : "DeepSeek summarization failed.";
+    console.log("DeepSeek summary failed", {
+      transient: isTransientAiFailure(undefined, message),
+      message,
+    });
     throw new AiProviderError(message, isTransientAiFailure(undefined, message), "deepseek");
   }
 }
 
 async function generateSummaryWithFallback(prompt: string, geminiApiKey?: string) {
-  const deepSeekApiKey = process.env.deepseek_api_key || process.env.DEEPSEEK_API_KEY;
+  const deepSeekApiKey = getDeepSeekApiKey();
 
   if (deepSeekApiKey) {
     try {
