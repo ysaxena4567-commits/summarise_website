@@ -411,6 +411,66 @@ function formatAiSummaryText(text: string) {
   }
 }
 
+function extractUsefulLines(text: string, limit = 12) {
+  const seen = new Set<string>();
+
+  return prioritizeDocumentText(text, 18_000)
+    .split(/\n{2,}|(?<=[.!?])\s+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => {
+      if (line.length < 35 || line.length > 260) return false;
+      const key = line.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return /[a-zA-Z]/.test(line);
+    })
+    .slice(0, limit);
+}
+
+function buildGroundedContinuitySummary(documents: ExtractedDocument[]) {
+  const mergedText = documents.map((document) => document.text).join("\n\n");
+  const usefulLines = extractUsefulLines(mergedText, 12);
+  const coreLines = usefulLines.slice(0, 6);
+  const practiceLines = usefulLines.slice(0, 5);
+
+  const structured: StructuredSummary = {
+    weightageTrendRadar: [
+      "Overall chapter priority: Generated from the uploaded document text available to JustFlamsit.",
+      "Trend analysis: No separate PYQ frequency pattern could be confirmed unless PYQ/sample-question content is present in the uploaded files.",
+    ],
+    coreHeadlines: coreLines.length
+      ? coreLines.map((line) => `🎯 Uploaded document concept - Priority Level: High | Core Concept: ${line} | Standard Exam Definition: Use the exact wording and terms from this uploaded material.`)
+      : [fallbackText],
+    multimodalExtractionMatrix: [
+      "### 🧩 Uploaded document evidence",
+      `* 🎯 **Core Measurement / Text Data:** ${coreLines[0] || fallbackText}`,
+      "* 🧠 **Visual / Diagram Calculation:** Text-derived concept only.",
+      "* 🚨 **Examiner's Trap:** Do not add diagram labels, formulas, or measurements that are not visible in the extracted document text.",
+      "",
+      "> **💡 The Winning Move:** Write answers using only the verified terms extracted from the uploaded file.",
+      "---",
+    ].join("\n"),
+    pyqProbabilityAnalysis: usefulLines.length
+      ? usefulLines.slice(0, 5).map((line) => `🎯 **High-Importance Question from Uploaded PYQ:** Not mentioned in the document | Why it matters: ${line} | Frequency Score: Not enough PYQ repetition data found | Prediction Confidence: Low | Winning Framework: Revise this concept directly from the uploaded chapter text.`)
+      : [fallbackText],
+    hiddenTraps: coreLines.length
+      ? coreLines.slice(0, 4).map((line) => `The Hidden Concept: ${line} | The Examiner's Trap: Confusing this extracted point with outside knowledge. | The Counter-Shield: Stick to the uploaded wording and avoid unsupported additions.`)
+      : [fallbackText],
+    phoenixGapAnalysis: [
+      "Statistically Overdue Topic: Not mentioned in the document | Warning: A reliable gap analysis needs both chapter text and recurring PYQ/sample-question patterns. | Sleeper Topic Summary: Upload PYQ files with the chapter to unlock stronger frequency-based predictions.",
+    ],
+    sprintPracticeQuestions: practiceLines.length
+      ? practiceLines.map((line, index) => `Practice Question: Explain the exam significance of this uploaded concept ${index + 1}: ${line} | Evaluation Guide: Award marks for exact keywords, correct sequence, and no unsupported outside facts.`)
+      : [fallbackText],
+    eleventhHourLifeline: Array.from({ length: 10 }, (_, index) => {
+      const line = usefulLines[index % Math.max(usefulLines.length, 1)];
+      return line || fallbackText;
+    }),
+  };
+
+  return formatSummary(structured);
+}
+
 function getGeminiApiKey() {
   return (
     process.env.GEMINI_API_KEY ||
@@ -541,7 +601,14 @@ async function summarizeWithGeminiRetry(documents: ExtractedDocument[], instruct
     console.log("Gemini summary retrying with compact prompt", {
       message: error instanceof Error ? error.message : "unknown",
     });
-    return summarizeWithGemini(buildCompactPrompt(documents, instructions));
+    try {
+      return await summarizeWithGemini(buildCompactPrompt(documents, instructions));
+    } catch (retryError) {
+      console.log("Gemini summary continuity response used", {
+        message: retryError instanceof Error ? retryError.message : "unknown",
+      });
+      return buildGroundedContinuitySummary(documents);
+    }
   }
 }
 
