@@ -12,11 +12,16 @@ import { clientIp, rateLimit, requireSameOrigin } from "@/lib/security";
 export const runtime = "nodejs";
 
 const SUMMARY_ERROR_MESSAGE = "Summary generation could not be completed. Please check the file and generate again.";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+const GEMINI_MODELS_TO_TRY = Array.from(
+  new Set([GEMINI_MODEL, DEFAULT_GEMINI_MODEL, "gemini-2.0-flash-lite", "gemini-1.5-flash"]),
+);
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_REQUEST_BYTES = MAX_FILES * MAX_FILE_BYTES + 256_000;
-const MAX_TEXT_CHARS = 240_000;
+const MAX_TEXT_CHARS = 90_000;
+const MAX_TEXT_CHARS_RETRY = 45_000;
 const MAX_INSTRUCTION_CHARS = 1_000;
 const fallbackText = "Not found in this document";
 
@@ -134,9 +139,53 @@ function normalizeJsonInstructions(value: unknown) {
   return value.replace(/\s+/g, " ").trim().slice(0, MAX_INSTRUCTION_CHARS);
 }
 
+function cleanExtractedText(text: string) {
+  return text
+    .replace(/-{8,}\s*Page\s*\(\d+\)\s*Break\s*-{8,}/gi, "\n")
+    .replace(/\u0000/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function prioritizeDocumentText(text: string, maxChars: number) {
+  const cleaned = cleanExtractedText(text);
+
+  if (cleaned.length <= maxChars) return cleaned;
+
+  const chunks = cleaned
+    .split(/\n{2,}|(?<=[.!?])\s+/)
+    .map((chunk) => chunk.replace(/\s+/g, " ").trim())
+    .filter((chunk) => chunk.length >= 24);
+
+  const scoredChunks = chunks.map((chunk, index) => {
+    const lower = chunk.toLowerCase();
+    const score =
+      (/\b(definition|formula|equation|diagram|figure|table|flowchart|cycle|phase|process|difference|function|role|importance|question|pyq|marks?|explain|describe|derive|calculate)\b/.test(lower)
+        ? 5
+        : 0) +
+      (/\d/.test(chunk) ? 2 : 0) +
+      (chunk.includes("?") ? 3 : 0) +
+      (index < 20 ? 2 : 0);
+
+    return { chunk, index, score };
+  });
+
+  const compact = scoredChunks
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 260)
+    .sort((a, b) => a.index - b.index)
+    .map((item) => item.chunk)
+    .join("\n\n")
+    .slice(0, maxChars)
+    .trim();
+
+  return compact || cleaned.slice(0, maxChars).trim();
+}
+
 function normalizeUploadedDocument(document: UploadedDocumentInput, index: number): ExtractedDocument {
   const name = document.name?.trim() || `uploaded-document-${index + 1}`;
-  const text = document.text?.trim() || "";
+  const text = cleanExtractedText(document.text || "");
 
   if (!text) {
     console.log(`File rejected due to no extracted text. name="${name}", type="${document.type || "missing"}", size=${document.size ?? 0}`);
@@ -242,6 +291,37 @@ Uploaded document text:
 ${sourceText}`;
 }
 
+function buildCompactPrompt(documents: ExtractedDocument[], instructions: string) {
+  const sourceText = documents
+    .map((document, index) => {
+      return `DOCUMENT ${index + 1}: ${document.name}\n${prioritizeDocumentText(document.text, MAX_TEXT_CHARS_RETRY)}`;
+    })
+    .join("\n\n---\n\n")
+    .slice(0, MAX_TEXT_CHARS_RETRY);
+
+  const instructionBlock = instructions
+    ? `\nUser's optional summary instructions:\n${instructions}\n`
+    : "";
+
+  return `You are JustFlamsit AI, an exam-focused document intelligence assistant for students.
+
+Use ONLY the uploaded document text below. Do not hallucinate. If information is not present, write "${fallbackText}".
+
+Return ONLY valid JSON with these exact keys:
+weightageTrendRadar, coreHeadlines, multimodalExtractionMatrix, pyqProbabilityAnalysis, hiddenTraps, phoenixGapAnalysis, sprintPracticeQuestions, eleventhHourLifeline.
+
+Rules:
+- Use plain strings inside arrays only.
+- Section 3 must be one Markdown string using Premium List Cards, not a table.
+- Section 7 must contain exactly 5 teacher/professor-style practice questions grounded in the document.
+- Section 8 must contain exactly 10 emergency revision bullets.
+${instructionBlock}
+
+Uploaded document text:
+
+${sourceText}`;
+}
+
 function displayJsonValue(value: unknown): string {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return String(value).trim();
@@ -332,7 +412,13 @@ function formatAiSummaryText(text: string) {
 }
 
 function getGeminiApiKey() {
-  return (process.env.GEMINI_API_KEY || "").trim();
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
+    ""
+  ).trim();
 }
 
 function extractGeminiText(response: unknown) {
@@ -375,57 +461,64 @@ async function summarizeWithGemini(prompt: string) {
   const timeoutId = setTimeout(() => abortController.abort(), 45_000);
 
   try {
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        signal: abortController.signal,
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [
+    let lastFailure = "Gemini summarization failed.";
+
+    for (const model of GEMINI_MODELS_TO_TRY) {
+      const geminiResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          signal: abortController.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [
+                {
+                  text:
+                    "You are JustFlamsit AI, an exam-focused document intelligence assistant for students. Generate accurate, grounded, structured study outputs from uploaded documents such as chapter notes, PYQs, handouts, PDFs, DOCX, and TXT files. Use only the uploaded document content. Do not hallucinate. If information is not present in the document, write: \"Not mentioned in the document.\" Keep the output useful for semester exams and viva preparation. Preserve the same structured sections currently used by JustFlamsit. Include all sections expected by the existing summary layout. Keep the tone clear, concise, and student-friendly. Make the summary practical for last-minute revision.",
+                },
+              ],
+            },
+            contents: [
               {
-                text:
-                  "You are JustFlamsit AI, an exam-focused document intelligence assistant for students. Generate accurate, grounded, structured study outputs from uploaded documents such as chapter notes, PYQs, handouts, PDFs, DOCX, and TXT files. Use only the uploaded document content. Do not hallucinate. If information is not present in the document, write: \"Not mentioned in the document.\" Keep the output useful for semester exams and viva preparation. Preserve the same structured sections currently used by JustFlamsit. Include all sections expected by the existing summary layout. Keep the tone clear, concise, and student-friendly. Make the summary practical for last-minute revision.",
+                role: "user",
+                parts: [{ text: prompt }],
               },
             ],
-          },
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: prompt }],
+            generationConfig: {
+              temperature: 0,
+              topP: 0.2,
+              maxOutputTokens: 8192,
+              responseMimeType: "application/json",
             },
-          ],
-          generationConfig: {
-            temperature: 0,
-            topP: 0.2,
-            maxOutputTokens: 4096,
-            responseMimeType: "application/json",
-          },
-        }),
-      },
-    );
+          }),
+        },
+      );
 
-    const data = await geminiResponse.json().catch(() => ({}));
+      const data = await geminiResponse.json().catch(() => ({}));
 
-    if (!geminiResponse.ok) {
-      const message =
-        typeof data?.error?.message === "string"
-          ? data.error.message
-          : "Gemini summarization failed.";
-      console.log("Gemini summary failed", {
-        status: geminiResponse.status,
-        message,
-      });
-      throw new AiProviderError(message);
+      if (!geminiResponse.ok) {
+        lastFailure =
+          typeof data?.error?.message === "string"
+            ? data.error.message
+            : "Gemini summarization failed.";
+        console.log("Gemini summary failed", {
+          model,
+          status: geminiResponse.status,
+          message: lastFailure,
+        });
+        continue;
+      }
+
+      const summary = extractGeminiText(data);
+      console.log("Gemini summary generated successfully", { model });
+      return summary;
     }
 
-    const summary = extractGeminiText(data);
-    console.log("Gemini summary generated successfully");
-    return summary;
+    throw new AiProviderError(lastFailure);
   } catch (error) {
     if (error instanceof AiProviderError) {
       throw error;
@@ -438,6 +531,17 @@ async function summarizeWithGemini(prompt: string) {
     throw new AiProviderError(message);
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function summarizeWithGeminiRetry(documents: ExtractedDocument[], instructions: string) {
+  try {
+    return await summarizeWithGemini(buildPrompt(documents, instructions));
+  } catch (error) {
+    console.log("Gemini summary retrying with compact prompt", {
+      message: error instanceof Error ? error.message : "unknown",
+    });
+    return summarizeWithGemini(buildCompactPrompt(documents, instructions));
   }
 }
 
@@ -518,8 +622,7 @@ export async function POST(request: Request) {
     let summary: string;
 
     try {
-      const prompt = buildPrompt(availableDocuments, instructions);
-      summary = await summarizeWithGemini(prompt);
+      summary = await summarizeWithGeminiRetry(availableDocuments, instructions);
     } catch (error) {
       await refundServerSummary(usageIdentity);
       throw error;
