@@ -436,7 +436,7 @@ async function summarizeWithGemini(prompt: string, apiKey: string) {
 }
 
 async function summarizeWithDeepSeek(prompt: string) {
-  const apiKey = process.env.deepseek_api_key;
+  const apiKey = process.env.deepseek_api_key || process.env.DEEPSEEK_API_KEY;
 
   if (!apiKey) {
     throw new AiProviderError("DeepSeek API key is not configured.", false, "deepseek");
@@ -452,6 +452,7 @@ async function summarizeWithDeepSeek(prompt: string) {
       body: JSON.stringify({
         model: DEEPSEEK_MODEL,
         temperature: 0.2,
+        max_tokens: 4096,
         messages: [
           {
             role: "system",
@@ -496,10 +497,10 @@ async function summarizeWithDeepSeek(prompt: string) {
         accumulator[section.key] = parsed[section.key] ?? [fallbackText];
         return accumulator;
       }, {});
-      console.log("DeepSeek fallback used");
+      console.log("DeepSeek summary used");
       return formatSummary(normalizedSummary);
     } catch {
-      console.log("DeepSeek fallback used");
+      console.log("DeepSeek summary used");
       return text;
     }
   } catch (error) {
@@ -512,7 +513,43 @@ async function summarizeWithDeepSeek(prompt: string) {
   }
 }
 
-async function generateSummaryWithFallback(prompt: string, geminiApiKey: string) {
+async function generateSummaryWithFallback(prompt: string, geminiApiKey?: string) {
+  const deepSeekApiKey = process.env.deepseek_api_key || process.env.DEEPSEEK_API_KEY;
+
+  if (deepSeekApiKey) {
+    try {
+      return await summarizeWithDeepSeek(prompt);
+    } catch (deepSeekError) {
+      console.log("DeepSeek primary failed, trying Gemini fallback");
+
+      if (!geminiApiKey) {
+        console.log("Both AI providers failed");
+        throw new AiProviderError(
+          AI_BUSY_MESSAGE,
+          true,
+          deepSeekError instanceof AiProviderError ? deepSeekError.provider : "deepseek",
+          deepSeekError instanceof AiProviderError ? deepSeekError.status : undefined,
+        );
+      }
+
+      try {
+        return await summarizeWithGemini(prompt, geminiApiKey);
+      } catch (geminiError) {
+        console.log("Both AI providers failed");
+        throw new AiProviderError(
+          AI_BUSY_MESSAGE,
+          true,
+          geminiError instanceof AiProviderError ? geminiError.provider : "gemini",
+          geminiError instanceof AiProviderError ? geminiError.status : undefined,
+        );
+      }
+    }
+  }
+
+  if (!geminiApiKey) {
+    throw new AiProviderError("No AI provider API key is configured.", false, "deepseek");
+  }
+
   try {
     return await summarizeWithGemini(prompt, geminiApiKey);
   } catch (error) {
@@ -555,13 +592,6 @@ export async function POST(request: Request) {
     if (rateLimitError) return rateLimitError;
 
     const apiKey = process.env.GEMINI_API_KEY;
-
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "GEMINI_API_KEY is not configured on the server." },
-        { status: 500 },
-      );
-    }
 
     const contentLength = Number(request.headers.get("content-length") || 0);
 
