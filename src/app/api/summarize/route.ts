@@ -11,8 +11,8 @@ import { clientIp, rateLimit, requireSameOrigin } from "@/lib/security";
 
 export const runtime = "nodejs";
 
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
 const SUMMARY_ERROR_MESSAGE = "Summary generation could not be completed. Please check the file and generate again.";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_REQUEST_BYTES = MAX_FILES * MAX_FILE_BYTES + 256_000;
@@ -28,10 +28,7 @@ type ExtractedDocument = {
 type StructuredSummary = Record<string, unknown>;
 
 class AiProviderError extends Error {
-  constructor(
-    message: string,
-    public readonly status?: number,
-  ) {
+  constructor(message: string) {
     super(message);
     this.name = "AiProviderError";
   }
@@ -334,96 +331,108 @@ function formatAiSummaryText(text: string) {
   }
 }
 
-function getDeepSeekApiKey() {
-  return (
-    process.env.DEEPSEEK_API_KEY ||
-    process.env.deepseek_api_key ||
-    ""
-  ).trim();
+function getGeminiApiKey() {
+  return (process.env.GEMINI_API_KEY || "").trim();
 }
 
-async function summarizeWithDeepSeek(prompt: string) {
-  const apiKey = getDeepSeekApiKey();
+function extractGeminiText(response: unknown) {
+  const candidate = response as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+    }>;
+    error?: { message?: string };
+  };
 
-  if (!apiKey) {
-    console.log("DeepSeek summary unavailable: API key is missing");
-    throw new AiProviderError("DeepSeek API key is not configured.");
+  if (candidate.error?.message) {
+    throw new Error(candidate.error.message);
   }
 
-  console.log("DeepSeek summary request started");
+  const text = candidate.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text)
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  if (!text) {
+    throw new Error("Gemini did not return a summary.");
+  }
+
+  return formatAiSummaryText(text);
+}
+
+async function summarizeWithGemini(prompt: string) {
+  const apiKey = getGeminiApiKey();
+
+  if (!apiKey) {
+    console.log("Gemini summary failed", { message: "GEMINI_API_KEY is missing" });
+    throw new AiProviderError("Gemini API key is not configured.");
+  }
+
+  console.log("Gemini summary request started");
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), 45_000);
 
   try {
-    const configuredModel = DEEPSEEK_MODEL.trim() || "deepseek-chat";
-    const modelsToTry = configuredModel === "deepseek-chat" ? ["deepseek-chat"] : [configuredModel, "deepseek-chat"];
-    let lastFailure: { status?: number; message: string } | null = null;
-
-    for (const model of modelsToTry) {
-      const deepSeekResponse = await fetch("https://api.deepseek.com/chat/completions", {
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
         method: "POST",
         signal: abortController.signal,
         headers: {
-          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
         },
         body: JSON.stringify({
-          model,
-          temperature: 0.2,
-          max_tokens: 4096,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are JustFlamsit AI, an exam-focused document intelligence assistant for students. Your job is to generate accurate, grounded, structured study outputs from uploaded documents such as chapter notes, PYQs, handouts, PDFs, DOCX, and TXT files. Use only the uploaded document content. Do not hallucinate. If information is not present in the document, write: \"Not mentioned in the document.\" Keep the answer useful for semester exams and viva preparation. Preserve the same structured sections currently used by JustFlamsit. Include all sections that the existing summary layout expects. Keep the tone clear, concise, and student-friendly. Make the summary practical for last-minute revision.",
-            },
+          systemInstruction: {
+            parts: [
+              {
+                text:
+                  "You are JustFlamsit AI, an exam-focused document intelligence assistant for students. Generate accurate, grounded, structured study outputs from uploaded documents such as chapter notes, PYQs, handouts, PDFs, DOCX, and TXT files. Use only the uploaded document content. Do not hallucinate. If information is not present in the document, write: \"Not mentioned in the document.\" Keep the output useful for semester exams and viva preparation. Preserve the same structured sections currently used by JustFlamsit. Include all sections expected by the existing summary layout. Keep the tone clear, concise, and student-friendly. Make the summary practical for last-minute revision.",
+              },
+            ],
+          },
+          contents: [
             {
               role: "user",
-              content: prompt,
+              parts: [{ text: prompt }],
             },
           ],
+          generationConfig: {
+            temperature: 0,
+            topP: 0.2,
+            maxOutputTokens: 4096,
+            responseMimeType: "application/json",
+          },
         }),
+      },
+    );
+
+    const data = await geminiResponse.json().catch(() => ({}));
+
+    if (!geminiResponse.ok) {
+      const message =
+        typeof data?.error?.message === "string"
+          ? data.error.message
+          : "Gemini summarization failed.";
+      console.log("Gemini summary failed", {
+        status: geminiResponse.status,
+        message,
       });
-
-      const data = await deepSeekResponse.json().catch(() => ({}));
-
-      if (!deepSeekResponse.ok) {
-        const message =
-          typeof data?.error?.message === "string"
-            ? data.error.message
-            : "DeepSeek summarization failed.";
-        lastFailure = { status: deepSeekResponse.status, message };
-        console.log("DeepSeek summary failed", {
-          model,
-          status: deepSeekResponse.status,
-          message,
-        });
-        continue;
-      }
-
-      const text =
-        typeof data?.choices?.[0]?.message?.content === "string"
-          ? data.choices[0].message.content.trim()
-          : "";
-
-      if (!text) {
-        lastFailure = { status: deepSeekResponse.status, message: "Empty response" };
-        console.log("DeepSeek summary failed", { model, status: deepSeekResponse.status, message: "Empty response" });
-        continue;
-      }
-
-      console.log("DeepSeek summary generated successfully");
-      return formatAiSummaryText(text);
+      throw new AiProviderError(message);
     }
 
-    throw new AiProviderError(lastFailure?.message || "DeepSeek summarization failed.", lastFailure?.status);
+    const summary = extractGeminiText(data);
+    console.log("Gemini summary generated successfully");
+    return summary;
   } catch (error) {
     if (error instanceof AiProviderError) {
       throw error;
     }
 
-    const message = error instanceof Error ? error.message : "DeepSeek summarization failed.";
-    console.log("DeepSeek summary failed", {
+    const message = error instanceof Error ? error.message : "Gemini summarization failed.";
+    console.log("Gemini summary failed", {
       message,
     });
     throw new AiProviderError(message);
@@ -510,7 +519,7 @@ export async function POST(request: Request) {
 
     try {
       const prompt = buildPrompt(availableDocuments, instructions);
-      summary = await summarizeWithDeepSeek(prompt);
+      summary = await summarizeWithGemini(prompt);
     } catch (error) {
       await refundServerSummary(usageIdentity);
       throw error;

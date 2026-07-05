@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
 const MAX_MESSAGE_CHARS = 12_000;
 const MAX_MESSAGES = 12;
 const UPSTREAM_TIMEOUT_MS = 25_000;
@@ -17,15 +17,15 @@ type ChatRequest = {
   messages?: unknown;
 };
 
-type DeepSeekMessage = {
-  role: "system" | "user" | "assistant";
-  content: string;
+type GeminiMessage = {
+  role: "user" | "model";
+  parts: Array<{ text: string }>;
 };
 
-type DeepSeekStreamChunk = {
-  choices?: Array<{
-    delta?: {
-      content?: string;
+type GeminiStreamChunk = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
     };
   }>;
 };
@@ -75,15 +75,15 @@ function getAllowedOrigins(request: Request) {
   return origins;
 }
 
-function getDeepSeekApiKey() {
-  return (process.env.DEEPSEEK_API_KEY || process.env.deepseek_api_key || "").trim();
+function getGeminiApiKey() {
+  return (process.env.GEMINI_API_KEY || "").trim();
 }
 
-function normalizeMessages(value: unknown): DeepSeekMessage[] {
+function normalizeMessages(value: unknown): GeminiMessage[] {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((message): DeepSeekMessage | null => {
+    .map((message): GeminiMessage | null => {
       if (!message || typeof message !== "object") return null;
 
       const { role, content } = message as IncomingMessage;
@@ -93,24 +93,29 @@ function normalizeMessages(value: unknown): DeepSeekMessage[] {
       if (!text) return null;
 
       return {
-        role: role === "assistant" ? "assistant" : "user",
-        content: text,
+        role: role === "assistant" ? "model" : "user",
+        parts: [{ text }],
       };
     })
-    .filter((message): message is DeepSeekMessage => message !== null)
+    .filter((message): message is GeminiMessage => message !== null)
     .slice(-MAX_MESSAGES);
 }
 
-function parseDeepSeekStreamChunk(line: string) {
+function parseGeminiStreamChunk(line: string) {
   const trimmed = line.trim();
   if (!trimmed.startsWith("data:")) return "";
 
   const payload = trimmed.slice(5).trim();
-  if (!payload || payload === "[DONE]") return "";
+  if (!payload) return "";
 
   try {
-    const parsed = JSON.parse(payload) as DeepSeekStreamChunk;
-    return parsed.choices?.[0]?.delta?.content || "";
+    const parsed = JSON.parse(payload) as GeminiStreamChunk;
+    return (
+      parsed.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text)
+        .filter(Boolean)
+        .join("") || ""
+    );
   } catch {
     return "";
   }
@@ -134,9 +139,9 @@ export async function POST(request: Request) {
       return createErrorResponse("Enter a message before sending.", 400);
     }
 
-    const apiKey = getDeepSeekApiKey();
+    const apiKey = getGeminiApiKey();
     if (!apiKey) {
-      console.error("Chat route is missing DEEPSEEK_API_KEY.");
+      console.error("Chat route is missing GEMINI_API_KEY.");
       return createErrorResponse("The AI service is not configured.", 503);
     }
 
@@ -144,30 +149,32 @@ export async function POST(request: Request) {
     const timeoutId = setTimeout(() => abortController.abort(), UPSTREAM_TIMEOUT_MS);
 
     try {
-      const upstreamResponse = await fetch("https://api.deepseek.com/chat/completions", {
-        method: "POST",
-        signal: abortController.signal,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: DEEPSEEK_MODEL,
-          temperature: 0.2,
-          stream: true,
-          messages: [
-            {
-              role: "system",
-              content: SYSTEM_INSTRUCTION,
+      const upstreamResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse`,
+        {
+          method: "POST",
+          signal: abortController.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: SYSTEM_INSTRUCTION }],
             },
-            ...messages,
-          ],
-        }),
-      });
+            contents: messages,
+            generationConfig: {
+              temperature: 0.1,
+              topP: 0.2,
+              maxOutputTokens: 2048,
+            },
+          }),
+        },
+      );
 
       if (!upstreamResponse.ok || !upstreamResponse.body) {
         clearTimeout(timeoutId);
-        console.error("DeepSeek chat request failed.", { status: upstreamResponse.status });
+        console.error("Gemini chat request failed.", { status: upstreamResponse.status });
         return createErrorResponse("The AI service is not configured.", 502);
       }
 
@@ -190,7 +197,7 @@ export async function POST(request: Request) {
                 bufferedText = lines.pop() || "";
 
                 for (const line of lines) {
-                  const chunkText = parseDeepSeekStreamChunk(line);
+                  const chunkText = parseGeminiStreamChunk(line);
                   if (chunkText) {
                     controller.enqueue(encoder.encode(formatSse("token", { text: chunkText })));
                   }
@@ -200,7 +207,7 @@ export async function POST(request: Request) {
               controller.enqueue(encoder.encode(formatSse("done", {})));
             } catch (error) {
               const timedOut = error instanceof DOMException && error.name === "AbortError";
-              console.error("DeepSeek chat stream failed.", { timedOut, error });
+              console.error("Gemini chat stream failed.", { timedOut, error });
               controller.enqueue(
                 encoder.encode(
                   formatSse("error", {
@@ -225,7 +232,7 @@ export async function POST(request: Request) {
     } catch (error) {
       clearTimeout(timeoutId);
       const timedOut = error instanceof DOMException && error.name === "AbortError";
-      console.error("DeepSeek chat request failed.", { timedOut, error });
+      console.error("Gemini chat request failed.", { timedOut, error });
       return createErrorResponse(
         timedOut ? "The AI service took too long. Please try again." : "The AI service is temporarily unavailable.",
         timedOut ? 504 : 502,
