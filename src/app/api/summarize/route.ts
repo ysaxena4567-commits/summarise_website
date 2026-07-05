@@ -171,15 +171,47 @@ function cleanExtractedText(text: string) {
     .trim();
 }
 
+function isLowSignalLine(line: string) {
+  const trimmed = line.replace(/\s+/g, " ").trim();
+  const lower = trimmed.toLowerCase();
+  const alphaCount = (trimmed.match(/[a-z]/gi) || []).length;
+  const alphaRatio = trimmed.length ? alphaCount / trimmed.length : 0;
+  const singleLetterTokens = (trimmed.match(/\b[a-zA-Z]\b/g) || []).length;
+
+  if (trimmed.length < 24) return true;
+  if (alphaRatio < 0.35) return true;
+  if (singleLetterTokens >= 8) return true;
+  if (/\b(school|department|university|college|faculty|course|subject|semester|roll\s*no|page\s*\d+|copyright|all\s+rights\s+reserved)\b/i.test(trimmed)) {
+    return true;
+  }
+  if (/^[A-Z0-9\s:.,/&()-]{40,}$/.test(trimmed) && !/\b(cell|theory|membrane|nucleus|mitosis|meiosis|chromosome|photosynthesis|respiration|enzyme|protein|formula|definition)\b/i.test(trimmed)) {
+    return true;
+  }
+  if (lower.includes("extract exact terms from this line")) return true;
+  if (lower.includes("uploaded document concept")) return true;
+
+  return false;
+}
+
+function cleanEvidenceLine(line: string) {
+  return line
+    .replace(/^\[Page\s+\d+\]\s*/i, "")
+    .replace(/\s+-\s+/g, " - ")
+    .replace(/\s+([,.;:?!])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function prioritizeDocumentText(text: string, maxChars: number) {
   const cleaned = cleanExtractedText(text);
-
-  if (cleaned.length <= maxChars) return cleaned;
-
   const chunks = cleaned
     .split(/\n{2,}|(?<=[.!?])\s+/)
-    .map((chunk) => chunk.replace(/\s+/g, " ").trim())
-    .filter((chunk) => chunk.length >= 24);
+    .map(cleanEvidenceLine)
+    .filter((chunk) => !isLowSignalLine(chunk));
+
+  if (cleaned.length <= maxChars && chunks.length >= 3) {
+    return chunks.join("\n\n").slice(0, maxChars).trim();
+  }
 
   const scoredChunks = chunks.map((chunk, index) => {
     const lower = chunk.toLowerCase();
@@ -243,17 +275,61 @@ function extractionQuality(text: string) {
   return "GOOD: readable extracted text";
 }
 
+function normalizeQuestionLine(line: string) {
+  let candidate = cleanEvidenceLine(line)
+    .replace(/^(?:q(?:uestion)?\.?\s*)?\d+[\).:-]\s*/i, "")
+    .replace(/^\(?\d+\s*marks?\)?\s*/i, "")
+    .trim();
+
+  if (candidate.includes("?")) {
+    const questionEnd = candidate.indexOf("?");
+    const beforeQuestion = candidate.slice(0, questionEnd + 1);
+    const lastBoundary = Math.max(
+      beforeQuestion.lastIndexOf("."),
+      beforeQuestion.lastIndexOf(";"),
+      beforeQuestion.lastIndexOf("\n"),
+    );
+    candidate = beforeQuestion.slice(Math.max(lastBoundary + 1, 0)).trim();
+
+    if (candidate.length < 12 && beforeQuestion.length <= 180) {
+      candidate = beforeQuestion.trim();
+    }
+  }
+
+  return candidate
+    .replace(/\bheads\s*up!?\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isUsefulQuestionLine(line: string) {
+  const candidate = normalizeQuestionLine(line);
+  const lower = candidate.toLowerCase();
+  const startsLikeQuestion =
+    /^(define|explain|describe|differentiate|distinguish|what\s+is|why|how|derive|calculate|prove|write\s+short\s+note|short\s+note|give\s+reason|draw|label|compare|discuss|state|list|enumerate|find|solve)\b/i.test(candidate);
+
+  if (candidate.length < 12 || candidate.length > 220) return false;
+  if (isLowSignalLine(candidate)) return false;
+  if (!candidate.includes("?") && !startsLikeQuestion) return false;
+  if (/\b(is|are|was|were|requires|required|causes|increases|decreases|however|therefore|because|utilized|synthesi[sz]e)\b/i.test(candidate) && candidate.length > 150) {
+    return false;
+  }
+  if (lower.includes("answer") || lower.includes("solution") || lower.includes("heads up")) return false;
+
+  return true;
+}
+
 function extractQuestionLikeLines(text: string, maxLines = 80) {
   const seen = new Set<string>();
-  const questionPattern =
-    /\b(define|explain|describe|differentiate|distinguish|what\s+is|why|how|derive|calculate|prove|write\s+short\s+note|short\s+note|give\s+reason|draw|label|diagram|compare|discuss|state|list|enumerate|marks?|part[-\s]*a|part[-\s]*b|viva|numerical)\b/i;
 
-  return cleanExtractedText(text)
-    .split(/\n+|(?<=[?])\s+|(?<=\.)\s+(?=\d+[\).])/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
+  const normalizedText = cleanExtractedText(text);
+  const explicitQuestions = normalizedText.match(/[^?\n]{8,220}\?/g) || [];
+  const commandQuestions = normalizedText.split(/\n+|(?<=\.)\s+(?=(?:q\.?\s*)?\d+[\).:-])/i);
+
+  return [...explicitQuestions, ...commandQuestions]
+    .map(normalizeQuestionLine)
     .filter((line) => {
-      if (line.length < 12 || line.length > 320) return false;
-      if (!questionPattern.test(line) && !line.includes("?")) return false;
+      if (!isUsefulQuestionLine(line)) return false;
       const key = line.toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
@@ -264,7 +340,7 @@ function extractQuestionLikeLines(text: string, maxLines = 80) {
 
 function compactChapterEvidence(text: string, maxChars: number) {
   const cleaned = cleanExtractedText(text);
-  if (cleaned.length <= maxChars) return cleaned;
+  if (cleaned.length <= maxChars) return prioritizeDocumentText(cleaned, maxChars);
 
   const chunks = cleaned.match(/[\s\S]{1,12000}/g) || [cleaned];
   const chunkNotes = chunks.map((chunk, index) => {
@@ -411,6 +487,9 @@ Do not reveal internal reasoning.
 Do not create new section headings.
 Do not change section names.
 Do not output generic filler.
+Ignore administrative headers such as school, department, course code, page labels, copyright text, and broken OCR fragments unless they are directly part of an exam concept.
+Never output these phrases: "Uploaded document concept", "extract exact terms from this line", "closest matching chapter concept", "question-paper evidence" as filler, or "Not enough PYQ repetition data found".
+If a question line includes an answer paragraph before the actual question, rewrite only the actual question cleanly; do not paste the answer paragraph as a PYQ.
 Be dense, specific, and practical.
 
 UPLOADED FILE DATASET
@@ -551,9 +630,10 @@ function extractUsefulLines(text: string, limit = 12) {
 
   return prioritizeDocumentText(text, 18_000)
     .split(/\n{2,}|(?<=[.!?])\s+/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
+    .map(cleanEvidenceLine)
     .filter((line) => {
       if (line.length < 35 || line.length > 260) return false;
+      if (isLowSignalLine(line)) return false;
       const key = line.toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
@@ -579,7 +659,7 @@ function buildGroundedContinuitySummary(dataset: PreparedDataset) {
         : "PYQ trend evidence: No dedicated PYQ/question-paper file was detected, so probability is chapter-derived.",
     ],
     coreHeadlines: coreLines.length
-      ? coreLines.map((line) => `Topic: ${line.slice(0, 80)} | Priority: High | Exam-ready explanation: ${line} | Key terms to memorize: extract exact terms from this line | Likely question wording: Explain or define this concept. | Why it matters: It appears as readable evidence in the uploaded study material.`)
+      ? coreLines.map((line) => `Topic: ${line.slice(0, 80)} | Priority: High | Exam-ready explanation: ${line} | Key terms to memorize: ${line.split(/\s+/).filter((word) => word.length > 5).slice(0, 6).join(", ") || "major terms from this concept"} | Likely question wording: Explain this concept with exam-relevant keywords. | Why it matters: It is one of the clearest readable concepts extracted from the uploaded material.`)
       : [fallbackText],
     multimodalExtractionMatrix: [
       "### Key extracted evidence",
@@ -591,14 +671,14 @@ function buildGroundedContinuitySummary(dataset: PreparedDataset) {
       "---",
     ].join("\n"),
     pyqProbabilityAnalysis: questionLines.length
-      ? questionLines.map((line) => `Question: ${line} | Mapped topic: closest matching chapter concept in the uploaded material | Probability: High | Type: question-paper evidence | Why it matters: It was extracted directly as a question-like line. | Answer framework: define key term, explain mechanism/steps, add diagram/formula only if present.`)
+      ? questionLines.map((line) => `Question: ${line} | Mapped topic: revise the matching concept from the chapter file | Probability: High | Type: extracted PYQ/question | Why it matters: It was extracted as a readable question from the uploaded question material. | Answer framework: define the key term, write 2-4 crisp points, and add diagram/formula only if it appears in the uploaded notes.`)
       : [
           dataset.pyqDetected
             ? "PYQ/question-paper file was not readable enough for reliable question extraction. Chapter-derived likely question: Explain the most repeated readable concept from the uploaded material. | Probability: Medium | Type: chapter-derived | Answer framework: Use exact uploaded definitions and key terms."
             : "Chapter-derived likely question: Explain the highest-yield readable concept from the uploaded material. | Probability: Medium | Type: chapter-derived | Answer framework: Use exact uploaded definitions and key terms.",
         ],
     hiddenTraps: coreLines.length
-      ? coreLines.slice(0, 4).map((line) => `Trap topic: ${line.slice(0, 90)} | Common mistake: writing a broad answer without the exact extracted keyword. | Similar terms to differentiate: compare only terms that appear nearby in uploaded text. | Examiner warning: do not add unsupported textbook facts.`)
+      ? coreLines.slice(0, 4).map((line) => `Trap topic: ${line.slice(0, 90)} | Common mistake: missing the exact keyword or sequence in this concept. | Similar terms to differentiate: compare with nearby terms only if they appear in the uploaded text. | Examiner warning: avoid unsupported outside facts.`)
       : [fallbackText],
     phoenixGapAnalysis: [
       dataset.questionLineCount > 0
