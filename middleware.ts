@@ -19,27 +19,19 @@ function withTransportSecurity(response: NextResponse) {
 }
 
 export default clerkMiddleware(async (auth, request) => {
-  try {
-    const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
 
-    if (process.env.NODE_ENV === "production" && forwardedProtocol === "http") {
-      const secureUrl = request.nextUrl.clone();
-      secureUrl.protocol = "https:";
-      return withTransportSecurity(NextResponse.redirect(secureUrl, 301));
-    }
-
-    if (isProtectedRoute(request)) {
-      await auth.protect();
-    }
-
-    return withTransportSecurity(NextResponse.next());
-  } catch (error) {
-    console.error("Middleware request handling failed.", error);
-    return NextResponse.json(
-      { error: "The service is temporarily unavailable. Please try again." },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
+  if (process.env.NODE_ENV === "production" && forwardedProtocol === "http") {
+    const secureUrl = request.nextUrl.clone();
+    secureUrl.protocol = "https:";
+    return withTransportSecurity(NextResponse.redirect(secureUrl, 301));
   }
+
+  if (isProtectedRoute(request)) {
+    await auth.protect();
+  }
+
+  return withTransportSecurity(NextResponse.next());
 });
 
 export const config = {
