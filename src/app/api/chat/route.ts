@@ -1,13 +1,12 @@
-import { GoogleGenerativeAI, type Content } from "@google/generative-ai";
-
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const GEMINI_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-2.5-flash-lite";
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
 const MAX_MESSAGE_CHARS = 12_000;
 const MAX_MESSAGES = 12;
 const UPSTREAM_TIMEOUT_MS = 25_000;
-const SYSTEM_INSTRUCTION = "You are JustFlamsit, a precise academic study assistant. Give accurate, concise, student-friendly help. Return a valid JSON object with exactly one string field named answer. Do not invent facts.";
+const SYSTEM_INSTRUCTION =
+  "You are JustFlamsit, a precise academic study assistant. Give accurate, concise, student-friendly help. Do not invent facts.";
 
 type IncomingMessage = {
   role?: unknown;
@@ -16,6 +15,19 @@ type IncomingMessage = {
 
 type ChatRequest = {
   messages?: unknown;
+};
+
+type DeepSeekMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+type DeepSeekStreamChunk = {
+  choices?: Array<{
+    delta?: {
+      content?: string;
+    };
+  }>;
 };
 
 function formatSse(event: string, payload: unknown) {
@@ -63,11 +75,15 @@ function getAllowedOrigins(request: Request) {
   return origins;
 }
 
-function normalizeMessages(value: unknown): Content[] {
+function getDeepSeekApiKey() {
+  return (process.env.DEEPSEEK_API_KEY || "").trim();
+}
+
+function normalizeMessages(value: unknown): DeepSeekMessage[] {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((message): Content | null => {
+    .map((message): DeepSeekMessage | null => {
       if (!message || typeof message !== "object") return null;
 
       const { role, content } = message as IncomingMessage;
@@ -77,12 +93,27 @@ function normalizeMessages(value: unknown): Content[] {
       if (!text) return null;
 
       return {
-        role: role === "assistant" ? "model" : "user",
-        parts: [{ text }],
+        role: role === "assistant" ? "assistant" : "user",
+        content: text,
       };
     })
-    .filter((message): message is Content => message !== null)
+    .filter((message): message is DeepSeekMessage => message !== null)
     .slice(-MAX_MESSAGES);
+}
+
+function parseDeepSeekStreamChunk(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data:")) return "";
+
+  const payload = trimmed.slice(5).trim();
+  if (!payload || payload === "[DONE]") return "";
+
+  try {
+    const parsed = JSON.parse(payload) as DeepSeekStreamChunk;
+    return parsed.choices?.[0]?.delta?.content || "";
+  } catch {
+    return "";
+  }
 }
 
 export async function POST(request: Request) {
@@ -98,51 +129,87 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json().catch(() => null)) as ChatRequest | null;
-    const contents = normalizeMessages(body?.messages);
-    if (!contents.length) {
+    const messages = normalizeMessages(body?.messages);
+    if (!messages.length) {
       return createErrorResponse("Enter a message before sending.", 400);
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = getDeepSeekApiKey();
     if (!apiKey) {
-      console.error("Chat route is missing GEMINI_API_KEY.");
+      console.error("Chat route is missing DEEPSEEK_API_KEY.");
       return createErrorResponse("The AI service is not configured.", 503);
     }
 
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), UPSTREAM_TIMEOUT_MS);
-    const client = new GoogleGenerativeAI(apiKey);
-    const model = client.getGenerativeModel({
-      model: GEMINI_MODEL,
-      systemInstruction: SYSTEM_INSTRUCTION,
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-      },
-    });
 
     try {
-      const result = await model.generateContentStream({ contents }, { signal: abortController.signal });
+      const upstreamResponse = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        signal: abortController.signal,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: DEEPSEEK_MODEL,
+          temperature: 0.2,
+          stream: true,
+          messages: [
+            {
+              role: "system",
+              content: SYSTEM_INSTRUCTION,
+            },
+            ...messages,
+          ],
+        }),
+      });
+
+      if (!upstreamResponse.ok || !upstreamResponse.body) {
+        clearTimeout(timeoutId);
+        console.error("DeepSeek chat request failed.", { status: upstreamResponse.status });
+        return createErrorResponse("The AI service is not configured.", 502);
+      }
+
       const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
 
       return createStreamResponse(
         new ReadableStream<Uint8Array>({
           async start(controller) {
+            const reader = upstreamResponse.body!.getReader();
+            let bufferedText = "";
+
             try {
-              for await (const chunk of result.stream) {
-                const chunkText = chunk.text();
-                if (chunkText) {
-                  controller.enqueue(encoder.encode(formatSse("token", { text: chunkText })));
+              while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                bufferedText += decoder.decode(value, { stream: true });
+                const lines = bufferedText.split("\n");
+                bufferedText = lines.pop() || "";
+
+                for (const line of lines) {
+                  const chunkText = parseDeepSeekStreamChunk(line);
+                  if (chunkText) {
+                    controller.enqueue(encoder.encode(formatSse("token", { text: chunkText })));
+                  }
                 }
               }
 
               controller.enqueue(encoder.encode(formatSse("done", {})));
             } catch (error) {
               const timedOut = error instanceof DOMException && error.name === "AbortError";
-              console.error("Gemini chat stream failed.", { timedOut, error });
-              controller.enqueue(encoder.encode(formatSse("error", {
-                message: timedOut ? "The AI service took too long. Please try again." : "The AI response was interrupted. Please try again.",
-              })));
+              console.error("DeepSeek chat stream failed.", { timedOut, error });
+              controller.enqueue(
+                encoder.encode(
+                  formatSse("error", {
+                    message: timedOut
+                      ? "The AI service took too long. Please try again."
+                      : "The AI response was interrupted. Please try again.",
+                  }),
+                ),
+              );
               controller.enqueue(encoder.encode(formatSse("done", {})));
             } finally {
               clearTimeout(timeoutId);
@@ -158,8 +225,11 @@ export async function POST(request: Request) {
     } catch (error) {
       clearTimeout(timeoutId);
       const timedOut = error instanceof DOMException && error.name === "AbortError";
-      console.error("Gemini chat request failed.", { timedOut, error });
-      return createErrorResponse(timedOut ? "The AI service took too long. Please try again." : "The AI service is temporarily unavailable.", timedOut ? 504 : 502);
+      console.error("DeepSeek chat request failed.", { timedOut, error });
+      return createErrorResponse(
+        timedOut ? "The AI service took too long. Please try again." : "The AI service is temporarily unavailable.",
+        timedOut ? 504 : 502,
+      );
     }
   } catch (error) {
     console.error("Unhandled chat route failure.", error);
