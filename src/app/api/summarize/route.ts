@@ -629,6 +629,10 @@ function makeExamQuestionFromEvidence(line: string, index: number, marksType: st
   return `Q${index}: ${command} ${topic}? | Evaluation guide: Include the exact keyword, one clear explanation, and one supported example/step if present in the uploaded material.`;
 }
 
+function stripPracticeGroupLabel(line: string) {
+  return line.replace(/^(?:2-mark questions|5-mark questions|long-answer questions|pyq-style questions):\s*/i, "").trim();
+}
+
 function sanitizePhoenixGapAnalysis(value: unknown) {
   const genericPatterns = [
     /compare extracted pyq question lines against the chapter concepts above/i,
@@ -666,7 +670,7 @@ function sanitizeSprintPracticeQuestions(value: unknown) {
   const questionWords = /\b(define|what\s+is|what\s+are|explain|describe|list|state|differentiate|distinguish|why|how|write\s+a\s+short\s+note|give\s+examples?|draw|label|calculate|solve|derive|compare|discuss|enumerate)\b/i;
 
   const normalized = items.map((item, index) => {
-    const cleanItem = cleanEvidenceLine(item);
+    const cleanItem = stripPracticeGroupLabel(cleanEvidenceLine(item));
     const isBadCopiedStatement =
       /question:\s*(?:2-mark|5-mark|long-answer)\s+practice\s+from\s+uploaded\s+material:/i.test(cleanItem) ||
       (/^question:/i.test(cleanItem) && !questionWords.test(cleanItem));
