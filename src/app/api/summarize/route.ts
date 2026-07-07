@@ -670,28 +670,44 @@ function sanitizeSprintPracticeQuestions(value: unknown) {
   const questionWords = /\b(define|what\s+is|what\s+are|explain|describe|list|state|differentiate|distinguish|why|how|write\s+a\s+short\s+note|give\s+examples?|draw|label|calculate|solve|derive|compare|discuss|enumerate)\b/i;
 
   const normalized = items.map((item, index) => {
-    const cleanItem = stripPracticeGroupLabel(cleanEvidenceLine(item));
+    const originalItem = cleanEvidenceLine(item);
+    const explicitGroup = originalItem.match(/^(2-mark questions|5-mark questions|long-answer questions|pyq-style questions):\s*/i)?.[1]?.toLowerCase();
+    const cleanItem = stripPracticeGroupLabel(originalItem);
     const isBadCopiedStatement =
       /question:\s*(?:2-mark|5-mark|long-answer)\s+practice\s+from\s+uploaded\s+material:/i.test(cleanItem) ||
       (/^question:/i.test(cleanItem) && !questionWords.test(cleanItem));
     const hasGuide = /evaluation guide:/i.test(cleanItem);
     const hasQuestionShape = /q\d+:/i.test(cleanItem) || /^question:/i.test(cleanItem) || questionWords.test(cleanItem);
+    const fallbackGroup =
+      index < 6 ? "2-mark questions" : index < 11 ? "5-mark questions" : "long-answer questions";
+    const group = explicitGroup || fallbackGroup;
 
     if (!isBadCopiedStatement && hasGuide && hasQuestionShape) {
-      return cleanItem
-        .replace(/^Question:\s*/i, `Q${index + 1}: `)
-        .replace(/\s+/g, " ")
-        .trim();
+      return {
+        group,
+        text: cleanItem
+          .replace(/^Question:\s*/i, `Q${index + 1}: `)
+          .replace(/\s+/g, " ")
+          .trim(),
+      };
     }
 
     const marksType = index < 6 ? "2-mark" : index < 10 ? "5-mark" : "Long-answer";
-    return makeExamQuestionFromEvidence(cleanItem, index + 1, marksType);
+    return {
+      group,
+      text: makeExamQuestionFromEvidence(cleanItem, index + 1, marksType),
+    };
   });
 
-  const twoMark = normalized.slice(0, 6).map((item, index) => `${index === 0 ? "2-mark questions: " : ""}${item}`);
-  const fiveMark = normalized.slice(6, 11).map((item, index) => `${index === 0 ? "5-mark questions: " : ""}${item.replace(/^Q\d+:/, `Q${index + 1}:`)}`);
-  const longAnswer = normalized.slice(11, 14).map((item, index) => `${index === 0 ? "Long-answer questions: " : ""}${item.replace(/^Q\d+:/, `Q${index + 1}:`)}`);
-  const grouped = [...twoMark, ...fiveMark, ...longAnswer].filter(Boolean);
+  const grouped = [
+    { key: "2-mark questions", label: "2-mark questions" },
+    { key: "5-mark questions", label: "5-mark questions" },
+    { key: "long-answer questions", label: "Long-answer questions" },
+    { key: "pyq-style questions", label: "PYQ-style questions" },
+  ].flatMap(({ key, label }) => {
+    const groupItems = normalized.filter((item) => item.group === key);
+    return groupItems.map((item, index) => `${index === 0 ? `${label}: ` : ""}${item.text.replace(/^Q\d+:/, `Q${index + 1}:`)}`);
+  });
 
   return grouped.length ? grouped : ["2-mark questions: Q1: Explain the highest-yield concept from the uploaded material? | Evaluation guide: Use exact keywords from the uploaded material and avoid outside facts."];
 }
