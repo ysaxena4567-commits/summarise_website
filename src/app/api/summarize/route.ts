@@ -510,8 +510,8 @@ Use exactly these 8 keys and no other keys:
   "multimodalExtractionMatrix": "### Key definition/formula/diagram/table/example\\n* **Core Measurement / Text Data:** ...\\n* **Visual / Diagram Calculation:** ...\\n* **Examiner's Trap:** ...\\n\\n> **The Winning Move:** ...\\n---",
   "pyqProbabilityAnalysis": ["Question: [actual readable PYQ/question line, if present] | Mapped topic: ... | Probability: High/Medium/Low | Type: definition/short answer/long answer/numerical/diagram/comparison | Why it matters: ... | Repeated/similar wording: ... | Answer framework: ..."],
   "hiddenTraps": ["Trap topic: ... | Common mistake: ... | Similar terms to differentiate: ... | Examiner warning: ... | Exact wording to remember: ..."],
-  "phoenixGapAnalysis": ["High-risk gap: ... | Evidence: ... | Why it may appear: ... | Revision action: ..."],
-  "sprintPracticeQuestions": ["Question: ... | Marks/type: ... | Evaluation guide: ..."],
+  "phoenixGapAnalysis": ["High-risk gap: ... | Why risky: ... | Evidence: ... | What to revise: ... | Confidence: High/Medium/Low"],
+  "sprintPracticeQuestions": ["2-mark questions: Q1: ... | Evaluation guide: ...", "5-mark questions: Q1: ... | Evaluation guide: ...", "Long-answer questions: Q1: ... | Evaluation guide: ...", "PYQ-style questions: Q1: ... | Source basis: Chapter-derived/PYQ-derived | Evaluation guide: ..."],
   "eleventhHourLifeline": ["Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5", "Bullet 6", "Bullet 7", "Bullet 8", "Bullet 9", "Bullet 10"]
 }
 
@@ -521,8 +521,12 @@ Section rules:
 - SECTION 3 must use vertical Premium List Cards only. Never use a markdown table. Include definitions, formulas, numerical patterns, diagrams/visual topics, tables/classifications, and examples only when present. If absent, write: "No clear formula/diagram evidence was found in extracted text."
 - SECTION 4 is most important when PYQ/question paper is uploaded. If readable question text exists, use actual question-like lines and never write "Question: Not mentioned." If PYQ was uploaded but unreadable, write exactly: "PYQ/question-paper file was not readable enough for reliable question extraction." Then create likely chapter-derived questions and label them chapter-derived.
 - SECTION 5 must contain real traps from the uploaded chapter content, not generic warnings.
-- SECTION 6 must identify chapter topics weak/missing in PYQ, PYQ topics weakly explained in notes, foundational surprise topics, and unreadable/unclear PDF areas. If PYQ data is limited, say: "Frequency-based prediction is limited because only limited readable PYQ content was extracted."
-- SECTION 7 must generate practice questions based only on uploaded material, including 2-mark, 5-mark, long-answer, PYQ-style, and diagram/formula/numerical questions when supported.
+- SECTION 6 and SECTION 7 require extra accuracy. In SECTION 6, do not output generic template warnings. Identify concrete high-risk gaps from the uploaded material and PYQ evidence. In SECTION 7, never copy a statement and label it as a question. Convert facts, headings, definitions, examples, and PYQ evidence into proper exam-style questions using command words like Define, Explain, Describe, List, Differentiate, State, Calculate, or Write a short note. Every question must be answerable from the uploaded material and must include a short evaluation guide.
+- SECTION 6 must output real high-risk revision gaps, not generic filler. For each gap include: Gap title, Why risky, Evidence from uploaded chapter/PYQ, What student should revise, and Confidence: High/Medium/Low. Identify gaps where PYQ asks a topic but notes explain it weakly, chapter explains a topic but readable PYQ does not test it clearly, a heading/definition/formula/example looks exam-important, similar concepts may confuse students, a formula/diagram/table is mentioned but under-explained, or extraction quality is weak and needs manual verification. If no strong PYQ data exists, write: "Frequency-based PYQ prediction is limited because readable PYQ data was limited. High-risk topics below are selected from chapter headings, definitions, examples, and repeated concepts."
+- SECTION 6 must never output these phrases or close variants: "Compare extracted PYQ question lines against the chapter concepts above", "Evidence: Some readable questions are present", "revision action: revise every topic", or vague template-like text.
+- SECTION 7 must generate proper exam-style questions from uploaded material. Group them inside the existing section content as 2-mark questions, 5-mark questions, Long-answer questions, and PYQ-style questions. Generate 4 to 6 two-mark questions, 3 to 5 five-mark questions, 1 to 3 long-answer questions when enough content exists, and 3 to 5 PYQ-style questions when readable PYQ/question-paper content exists. If uploaded content is short, generate fewer but higher-quality questions.
+- SECTION 7 question rules: each question must start with an exam command word, use a clean topic name, avoid copied broken text, be answerable from uploaded material, include a concise evaluation guide, mention exact keywords to include, and only ask numerical/diagram questions when numerical/diagram evidence exists.
+- SECTION 7 forbidden formats: "Question: 2-mark practice from uploaded material: [copied statement]", "Question: [raw heading] [raw statement]", "Explain the exam significance of uploaded concept", copied factual sentences without question wording, unsupported outside knowledge, numerical questions without numerical data, or diagram questions without diagram evidence.
 - SECTION 8 must be an ultra-condensed last-minute rescue sheet with exactly 10 bullets.
 
 Quality gate before final JSON:
@@ -532,8 +536,11 @@ Quality gate before final JSON:
 4. Output is not generic.
 5. Topic names are clean.
 6. Definitions are exam-ready.
-7. Section 8 is useful for last-minute revision.
-8. Every JSON array contains strings only. No nested objects, arrays, null, or booleans.`;
+7. Section 6 contains specific high-risk gaps with real revision actions.
+8. Section 7 questions are actual questions and every question has an evaluation guide.
+9. Section 7 does not paste raw statements as questions.
+10. Section 8 is useful for last-minute revision.
+11. Every JSON array contains strings only. No nested objects, arrays, null, or booleans.`;
 }
 
 function displayJsonValue(value: unknown): string {
@@ -574,6 +581,115 @@ function normalizeSection(value: unknown) {
   }
 
   return [fallbackText];
+}
+
+function conciseTopicFromEvidence(line: string) {
+  const cleaned = cleanEvidenceLine(line)
+    .replace(/^question:\s*/i, "")
+    .replace(/^(?:2-mark|5-mark|long-answer)\s+practice\s+from\s+uploaded\s+material:\s*/i, "")
+    .replace(/\s*\|\s*Evaluation guide:.*$/i, "")
+    .replace(/\s*\|\s*Marks\/type:.*$/i, "")
+    .trim();
+
+  const firstClause = cleaned.split(/[.;:|]/)[0]?.trim() || cleaned;
+  const words = firstClause.split(/\s+/).filter(Boolean);
+  return words.slice(0, 14).join(" ").replace(/[.?]+$/g, "").trim() || "this uploaded concept";
+}
+
+function isExamQuestionText(line: string) {
+  const cleaned = line.replace(/^q\d+:\s*/i, "").trim();
+  return /^(define|what\s+is|what\s+are|explain|describe|list|state|differentiate|distinguish|why|how|write\s+a\s+short\s+note|give\s+examples?|draw|label|calculate|solve|derive|compare|discuss|enumerate)\b/i.test(cleaned);
+}
+
+function makeExamQuestionFromEvidence(line: string, index: number, marksType: string) {
+  const cleaned = cleanEvidenceLine(line);
+  const topic = conciseTopicFromEvidence(cleaned);
+
+  if (isUsefulQuestionLine(cleaned) && isExamQuestionText(cleaned)) {
+    return `Q${index}: ${normalizeQuestionLine(cleaned)} | Evaluation guide: Use the exact uploaded keywords, keep the answer direct, and add a diagram/formula only if it appears in the material.`;
+  }
+
+  if (/\b(difference|differentiate|distinguish|compare)\b/i.test(cleaned)) {
+    return `Q${index}: Differentiate between the linked concepts in ${topic}. | Evaluation guide: Mention the exact comparison terms from the uploaded material and avoid adding outside points.`;
+  }
+
+  if (/\b(source|sources|types|steps|stages|phases|factors|features|functions)\b/i.test(cleaned)) {
+    return `Q${index}: List the main ${/\bsteps|stages|phases\b/i.test(cleaned) ? "steps/stages" : "sources/types/features"} of ${topic}. | Evaluation guide: Include only the items stated in the uploaded material and keep the sequence if visible.`;
+  }
+
+  if (/\b(formula|equation|calculate|value|percentage|percent|ratio|unit)\b/i.test(cleaned)) {
+    return `Q${index}: State the formula or numerical fact connected with ${topic}. | Evaluation guide: Write the exact value/formula and unit from the uploaded material; do not invent missing data.`;
+  }
+
+  if (/\b(defined as|is called|is known as|means|refers to|states that)\b/i.test(cleaned)) {
+    return `Q${index}: Define ${topic}. | Evaluation guide: Use the exact definition keywords from the uploaded material and keep the answer exam-ready.`;
+  }
+
+  const command = marksType === "2-mark" ? "What is meant by" : marksType === "Long-answer" ? "Describe" : "Explain";
+  return `Q${index}: ${command} ${topic}? | Evaluation guide: Include the exact keyword, one clear explanation, and one supported example/step if present in the uploaded material.`;
+}
+
+function sanitizePhoenixGapAnalysis(value: unknown) {
+  const genericPatterns = [
+    /compare extracted pyq question lines against the chapter concepts above/i,
+    /evidence:\s*some readable questions are present/i,
+    /revision action:\s*revise every topic/i,
+    /generic filler/i,
+  ];
+
+  const items = normalizeSection(value).filter((item) => !genericPatterns.some((pattern) => pattern.test(item)));
+  const cleaned = items.map((item, index) => {
+    const topic = conciseTopicFromEvidence(item);
+    const hasRequiredShape =
+      /high-risk gap:/i.test(item) &&
+      /why risky:/i.test(item) &&
+      /evidence:/i.test(item) &&
+      /(what to revise:|revision action:)/i.test(item) &&
+      /confidence:/i.test(item);
+
+    if (hasRequiredShape) {
+      return item.replace(/\s+/g, " ").trim();
+    }
+
+    return `High-risk gap: ${topic} | Why risky: This topic appears in the uploaded evidence but may be under-revised or weakly connected to readable PYQ patterns. | Evidence: ${topic} was extracted from the uploaded material. | What to revise: Prepare the exact definition, key terms, and any visible example/diagram/formula linked to it. | Confidence: ${index < 2 ? "High" : "Medium"}`;
+  });
+
+  return cleaned.length
+    ? cleaned
+    : [
+        "High-risk gap: Frequency-based PYQ prediction is limited because readable PYQ data was limited. High-risk topics below are selected from chapter headings, definitions, examples, and repeated concepts. | Why risky: Students may skip chapter concepts that are exam-relevant even without clear PYQ repetition. | Evidence: Readable uploaded chapter evidence was available but PYQ clustering was weak. | What to revise: Prioritize headings, definitions, examples, formulas, diagrams, and repeated terms from the uploaded material. | Confidence: Medium",
+      ];
+}
+
+function sanitizeSprintPracticeQuestions(value: unknown) {
+  const items = normalizeSection(value);
+  const questionWords = /\b(define|what\s+is|what\s+are|explain|describe|list|state|differentiate|distinguish|why|how|write\s+a\s+short\s+note|give\s+examples?|draw|label|calculate|solve|derive|compare|discuss|enumerate)\b/i;
+
+  const normalized = items.map((item, index) => {
+    const cleanItem = cleanEvidenceLine(item);
+    const isBadCopiedStatement =
+      /question:\s*(?:2-mark|5-mark|long-answer)\s+practice\s+from\s+uploaded\s+material:/i.test(cleanItem) ||
+      (/^question:/i.test(cleanItem) && !questionWords.test(cleanItem));
+    const hasGuide = /evaluation guide:/i.test(cleanItem);
+    const hasQuestionShape = /q\d+:/i.test(cleanItem) || /^question:/i.test(cleanItem) || questionWords.test(cleanItem);
+
+    if (!isBadCopiedStatement && hasGuide && hasQuestionShape) {
+      return cleanItem
+        .replace(/^Question:\s*/i, `Q${index + 1}: `)
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    const marksType = index < 6 ? "2-mark" : index < 10 ? "5-mark" : "Long-answer";
+    return makeExamQuestionFromEvidence(cleanItem, index + 1, marksType);
+  });
+
+  const twoMark = normalized.slice(0, 6).map((item, index) => `${index === 0 ? "2-mark questions: " : ""}${item}`);
+  const fiveMark = normalized.slice(6, 11).map((item, index) => `${index === 0 ? "5-mark questions: " : ""}${item.replace(/^Q\d+:/, `Q${index + 1}:`)}`);
+  const longAnswer = normalized.slice(11, 14).map((item, index) => `${index === 0 ? "Long-answer questions: " : ""}${item.replace(/^Q\d+:/, `Q${index + 1}:`)}`);
+  const grouped = [...twoMark, ...fiveMark, ...longAnswer].filter(Boolean);
+
+  return grouped.length ? grouped : ["2-mark questions: Q1: Explain the highest-yield concept from the uploaded material? | Evaluation guide: Use exact keywords from the uploaded material and avoid outside facts."];
 }
 
 function cleanJsonText(text: string) {
@@ -619,6 +735,8 @@ function formatAiSummaryText(text: string) {
       accumulator[section.key] = parsed[section.key] ?? [fallbackText];
       return accumulator;
     }, {});
+    normalizedSummary.phoenixGapAnalysis = sanitizePhoenixGapAnalysis(normalizedSummary.phoenixGapAnalysis);
+    normalizedSummary.sprintPracticeQuestions = sanitizeSprintPracticeQuestions(normalizedSummary.sprintPracticeQuestions);
     return formatSummary(normalizedSummary);
   } catch {
     return text;
@@ -682,11 +800,22 @@ function buildGroundedContinuitySummary(dataset: PreparedDataset) {
       : [fallbackText],
     phoenixGapAnalysis: [
       dataset.questionLineCount > 0
-        ? "High-risk gap: Compare extracted PYQ question lines against the chapter concepts above. | Evidence: Some readable questions are present, but frequency clustering was limited by extracted text quality. | Revision action: revise every topic mapped to an extracted question line first."
-        : "High-risk gap: Frequency-based prediction is limited because only limited readable PYQ content was extracted. | Evidence: No strong question-line cluster was readable. | Revision action: revise chapter headings, definitions, examples, and diagram/table mentions first.",
+        ? `High-risk gap: PYQ-linked concepts may be underprepared | Why risky: readable question lines were extracted, but students may revise the chapter broadly instead of targeting those exact asked patterns. | Evidence: ${questionLines[0] || "Readable PYQ/question text was detected."} | What to revise: Prepare direct answers for each extracted question and connect them to the matching chapter definitions, examples, diagrams, or formulas. | Confidence: High`
+        : "High-risk gap: Frequency-based PYQ prediction is limited because readable PYQ data was limited. High-risk topics below are selected from chapter headings, definitions, examples, and repeated concepts. | Why risky: students may skip chapter concepts that are exam-relevant even without clear PYQ repetition. | Evidence: No strong readable PYQ question cluster was extracted. | What to revise: Revise chapter headings, definitions, examples, formulas, diagrams, and repeated terms first. | Confidence: Medium",
+      coreLines[0]
+        ? `High-risk gap: ${conciseTopicFromEvidence(coreLines[0])} | Why risky: this appears as a clear chapter concept and can be turned into a short-answer or definition question. | Evidence: ${coreLines[0]} | What to revise: Memorize the exact definition keywords and prepare a 2-mark answer. | Confidence: High`
+        : fallbackText,
+      coreLines[1]
+        ? `High-risk gap: ${conciseTopicFromEvidence(coreLines[1])} | Why risky: similar terms or steps around this concept may confuse students during fast revision. | Evidence: ${coreLines[1]} | What to revise: Make a clean comparison or stepwise explanation using only uploaded material. | Confidence: Medium`
+        : fallbackText,
     ],
     sprintPracticeQuestions: practiceLines.length
-      ? practiceLines.map((line, index) => `Question: ${index + 1 <= 2 ? "2-mark" : index + 1 <= 4 ? "5-mark" : "Long-answer"} practice from uploaded material: ${line} | Evaluation guide: include exact keyword, one direct explanation, and one supported example/step if present.`)
+      ? sanitizeSprintPracticeQuestions([
+          ...practiceLines.slice(0, 6).map((line, index) => makeExamQuestionFromEvidence(line, index + 1, "2-mark")),
+          ...practiceLines.slice(0, 5).map((line, index) => makeExamQuestionFromEvidence(line, index + 7, "5-mark")),
+          ...practiceLines.slice(0, 2).map((line, index) => makeExamQuestionFromEvidence(line, index + 12, "Long-answer")),
+          ...questionLines.slice(0, 4).map((line, index) => `PYQ-style questions: Q${index + 1}: ${normalizeQuestionLine(line)} | Source basis: PYQ-derived | Evaluation guide: Answer using the matching chapter keywords and keep the structure aligned with the uploaded question.`),
+        ])
       : [fallbackText],
     eleventhHourLifeline: Array.from({ length: 10 }, (_, index) => {
       const line = usefulLines[index % Math.max(usefulLines.length, 1)];
@@ -822,6 +951,8 @@ async function summarizeWithGemini(prompt: string) {
 
 async function summarizeWithGeminiRetry(documents: ExtractedDocument[], instructions: string) {
   const fullDataset = prepareDataset(documents, MAX_TEXT_CHARS);
+  console.log("Gemini quality prompt v2 active");
+  console.log("Section 6/7 strict rules applied");
 
   try {
     return await summarizeWithGemini(buildDatasetPrompt(fullDataset, instructions));
